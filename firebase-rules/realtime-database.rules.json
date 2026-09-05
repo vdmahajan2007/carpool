@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "liveTrips": {
+      "$tripId": {
+        ".read": "data.child('status').val() === 'active' && data.child('expiresAt').val() > now",
+        ".write": "auth !== null",
+        ".validate": "newData.hasChildren(['driverName', 'status', 'lat', 'lng', 'timestamp'])"
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

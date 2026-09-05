@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - Carpool Tracker</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🚗</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav id="sidebar" class="sidebar"></nav>
+    <main class="main-content">
+        <header id="topbar" class="top-bar"></header>
+        <div class="page-content">
+            <div class="container-fluid py-3">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1 class="h3 mb-0 text-gray-800">Reports</h1>
+                    <select id="yearSelector" class="form-select w-auto">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <!-- Summary Cards Row -->
+                <div class="row g-3 mb-4">
+                    <div class="col-6 col-md-3">
+                        <div class="card h-100 shadow-sm border-0 border-start border-4 border-primary">
+                            <div class="card-body py-2 px-3">
+                                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1" style="font-size: 0.8rem;">Total Trips</div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalTrips">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card h-100 shadow-sm border-0 border-start border-4 border-info">
+                            <div class="card-body py-2 px-3">
+                                <div class="text-xs font-weight-bold text-info text-uppercase mb-1" style="font-size: 0.8rem;">Total Distance (km)</div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalDistance">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card h-100 shadow-sm border-0 border-start border-4 border-success">
+                            <div class="card-body py-2 px-3">
+                                <div class="text-xs font-weight-bold text-success text-uppercase mb-1" style="font-size: 0.8rem;">Total Fuel Cost</div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalFuelCost">₹0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="card h-100 shadow-sm border-0 border-start border-4 border-warning">
+                            <div class="card-body py-2 px-3">
+                                <div class="text-xs font-weight-bold text-warning text-uppercase mb-1" style="font-size: 0.8rem;">Total Contributions</div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalContributions">₹0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Row 1 -->
+                <div class="row g-4 mb-4">
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white py-3">
+                                <h6 class="m-0 font-weight-bold text-primary">Monthly Distance (km)</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container" style="position: relative; height:280px;">
+                                    <canvas id="monthlyDistanceChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white py-3">
+                                <h6 class="m-0 font-weight-bold text-primary">Monthly Fuel Cost (₹)</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container" style="position: relative; height:280px;">
+                                    <canvas id="monthlyFuelCostChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Row 2 -->
+                <div class="row g-4 mb-4">
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white py-3">
+                                <h6 class="m-0 font-weight-bold text-primary">Passenger Contributions</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container" style="position: relative; height:280px;">
+                                    <canvas id="passengerContributionsChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white py-3">
+                                <h6 class="m-0 font-weight-bold text-primary">Trip Count by Month</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container" style="position: relative; height:280px;">
+                                    <canvas id="tripCountChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Table -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                        <h6 class="m-0 font-weight-bold text-primary">Monthly Summary</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped" id="monthlySummaryTable">
+                                <thead>
+                                    <tr id="tableHeaderRow">
+                                        <th>Month</th>
+                                        <th>Trips</th>
+                                        <th>Distance (km)</th>
+                                        <th>Fuel (L)</th>
+                                        <th>Cost (₹)</th>
+                                        <!-- Passenger columns added by JS -->
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBody">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                                <tfoot id="tableFoot" class="fw-bold table-light">
+                                    <!-- Populated by JS -->
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export / Backup -->
+                <div class="row g-3 mb-5 pb-5">
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white">
+                                <h6 class="m-0 font-weight-bold text-secondary">Export Data</h6>
+                            </div>
+                            <div class="card-body d-flex flex-column gap-2">
+                                <button class="btn btn-outline-primary w-100" id="btnExportTrips"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Export Trips (CSV)</button>
+                                <button class="btn btn-outline-success w-100" id="btnExportSettlements"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Export Settlements (CSV)</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white">
+                                <h6 class="m-0 font-weight-bold text-secondary">Backup & Restore</h6>
+                            </div>
+                            <div class="card-body d-flex flex-column gap-2">
+                                <button class="btn btn-outline-secondary w-100" id="btnBackup"><i class="bi bi-download me-2"></i>Backup All Data (JSON)</button>
+                                <div>
+                                    <input type="file" id="restoreFileInput" accept=".json" class="d-none">
+                                    <button class="btn btn-outline-danger w-100" id="btnRestore"><i class="bi bi-upload me-2"></i>Restore Data</button>
+                                    <div class="form-text text-danger mt-1 text-center"><small>Warning: Restoring will overwrite existing data!</small></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+    <nav id="bottomnav" class="bottom-nav"></nav>
+    <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1090;"></div>
+    
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/firebase-config.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/reports.js"></script>
+</body>
+</html>
