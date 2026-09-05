@@ -60,7 +60,7 @@
     }
 
     // ── Settings CRUD ─────────────────────────────────────────
-    async function getSettings(forceRefresh) {
+    async function loadSettings(forceRefresh) {
         if (state.settings && !forceRefresh) return state.settings;
         try {
             const doc = await db.collection('settings').doc('car').get();
@@ -78,6 +78,10 @@
         }
     }
 
+    function getSettings() {
+        return state.settings || { ...DEFAULT_SETTINGS };
+    }
+
     async function saveSettings(data) {
         try {
             await db.collection('settings').doc('car').set(data, { merge: true });
@@ -92,7 +96,7 @@
     }
 
     // ── People CRUD ───────────────────────────────────────────
-    async function getPeople(forceRefresh) {
+    async function loadPeople(forceRefresh) {
         if (state.people && !forceRefresh) return state.people;
         try {
             const snapshot = await db.collection('people').orderBy('name').get();
@@ -100,7 +104,7 @@
             snapshot.forEach(doc => state.people.push({ id: doc.id, ...doc.data() }));
             if (state.people.length === 0) {
                 await initializeDefaults();
-                return getPeople(true);
+                return loadPeople(true);
             }
             return state.people;
         } catch (error) {
@@ -110,18 +114,22 @@
         }
     }
 
-    async function getActivePeople() {
-        const people = await getPeople();
+    function getPeople() {
+        return state.people || [...DEFAULT_PEOPLE];
+    }
+
+    function getActivePeople() {
+        const people = getPeople();
         return people.filter(p => p.active !== false);
     }
 
-    async function getPassengers() {
-        const active = await getActivePeople();
+    function getPassengers() {
+        const active = getActivePeople();
         return active.filter(p => p.role === 'Passenger');
     }
 
-    async function getDriver() {
-        const active = await getActivePeople();
+    function getDriver() {
+        const active = getActivePeople();
         return active.find(p => p.role === 'Driver') || null;
     }
 
@@ -765,8 +773,8 @@
         try {
             await signInAnonymously();
             await initializeDefaults();
-            await getSettings();
-            await getPeople();
+            await loadSettings();
+            await loadPeople();
             initNavigation(activePage);
             state.initialized = true;
             if (pageInitFn) await pageInitFn();
@@ -802,10 +810,10 @@
         auth: auth,
 
         // Settings
-        getSettings: getSettings, saveSettings: saveSettings,
+        getSettings: getSettings, loadSettings: loadSettings, saveSettings: saveSettings,
 
         // People
-        getPeople: getPeople, getActivePeople: getActivePeople,
+        getPeople: getPeople, loadPeople: loadPeople, getActivePeople: getActivePeople,
         getPassengers: getPassengers, getDriver: getDriver,
         savePerson: savePerson, deletePerson: deletePerson,
 
