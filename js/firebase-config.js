@@ -15,13 +15,13 @@
 // ============================================================
 
 const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyB1c2D3e4F5g6H7i8J9kLmNoPqRsTuVwXy",
+    authDomain: "my-carpool-tracker.firebaseapp.com",
+    databaseURL: "https://my-carpool-tracker-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "my-carpool-tracker",
+    storageBucket: "my-carpool-tracker.firebasestorage.app",
+    messagingSenderId: "123456789012",
+    appId: "1:123456789012:web:abc123def456ghi789"
 };
 
 // ============================================================
