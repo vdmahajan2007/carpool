@@ -14,15 +14,16 @@
 // See README.md for detailed setup instructions.
 // ============================================================
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyAei8nBj-R_3PW_L_j5dW7FpmO9hgTy-w0",
-    authDomain: "my-carpool-tracker.firebaseapp.com",
-    databaseURL: "https://my-carpool-tracker-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "my-carpool-tracker",
-    storageBucket: "my-carpool-tracker.firebasestorage.app",
-    messagingSenderId: "31230189160",
-    appId: "1:31230189160:web:3cab148ed469895ba2a5dd",
-    measurementId: "G-F3731PMLG1"
+  apiKey: "AIzaSyAei8nBj-R_3PW_L_j5dW7FpmO9hgTy-w0",
+  authDomain: "my-carpool-tracker.firebaseapp.com",
+  databaseURL: "https://my-carpool-tracker-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "my-carpool-tracker",
+  storageBucket: "my-carpool-tracker.firebasestorage.app",
+  messagingSenderId: "31230189160",
+  appId: "1:31230189160:web:3cab148ed469895ba2a5dd",
+  measurementId: "G-F3731PMLG1"
 };
 
 // ============================================================
