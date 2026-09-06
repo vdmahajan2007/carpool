@@ -26,15 +26,17 @@
         petrolPriceUpdated: new Date().toISOString().split('T')[0],
         driverName: 'Vivek',
         driverId: 'vivek',
-        sharingMode: 'equal',
+        driverDistance: 17,
+        sharingMode: 'distance', // Default: Distance Based
         customPercentages: {},
         tripExpiryHours: 4
     };
 
     const DEFAULT_PEOPLE = [
-        { id: 'vivek', name: 'Vivek', role: 'Driver', distance: 17, phone: '', active: true },
-        { id: 'jaydeep', name: 'Jaydeep', role: 'Passenger', distance: 8, phone: '', active: true },
-        { id: 'madhura', name: 'Madhura', role: 'Passenger', distance: 10, phone: '', active: true },
+        { id: 'vivek', name: 'Vivek', role: 'Driver', distance: 17, pickupDistance: 17, homeLocation: 'Vivek Home', officeLocation: 'Office', pickupLocation: 'Vivek Home', phone: '', active: true },
+        { id: 'jaydeep', name: 'Jaydeep', role: 'Passenger', distance: 8, pickupDistance: 9, homeLocation: 'Jaydeep Home', officeLocation: 'Office', pickupLocation: 'Jaydeep Pickup', phone: '', active: true },
+        { id: 'madhura', name: 'Madhura', role: 'Passenger', distance: 10, pickupDistance: 10, homeLocation: 'Madhura Home', officeLocation: 'Office', pickupLocation: 'Madhura Pickup', phone: '', active: true },
+        { id: 'harsha', name: 'Harsha', role: 'Passenger', distance: 16, pickupDistance: 16, homeLocation: 'Harsha Home', officeLocation: 'Office', pickupLocation: 'Harsha Pickup', phone: '', active: true }
     ];
 
     // ── Application State ─────────────────────────────────────
@@ -54,7 +56,7 @@
             return result.user;
         } catch (error) {
             console.error('Auth error:', error);
-            showToast('Authentication failed. Some features may not work.', 'danger');
+            showToast('Authentication failed. Check your Firebase credentials or authorized domains.', 'danger');
             return null;
         }
     }
@@ -65,7 +67,7 @@
         try {
             const doc = await db.collection('settings').doc('car').get();
             if (doc.exists) {
-                state.settings = doc.data();
+                state.settings = { ...DEFAULT_SETTINGS, ...doc.data() };
             } else {
                 await initializeDefaults();
                 state.settings = { ...DEFAULT_SETTINGS };
@@ -130,16 +132,25 @@
 
     function getDriver() {
         const active = getActivePeople();
-        return active.find(p => p.role === 'Driver') || null;
+        return active.find(p => p.role === 'Driver') || active.find(p => p.id === (state.settings?.driverId || 'vivek')) || null;
     }
 
     async function savePerson(data) {
         try {
             const id = data.id || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            const saveData = { ...data };
+            const saveData = {
+                ...data,
+                distance: parseFloat(data.distance || 0),
+                pickupDistance: parseFloat(data.pickupDistance !== undefined ? data.pickupDistance : (data.distance || 0)),
+                homeLocation: data.homeLocation || '',
+                officeLocation: data.officeLocation || '',
+                pickupLocation: data.pickupLocation || '',
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
             delete saveData.id;
             await db.collection('people').doc(id).set(saveData, { merge: true });
             state.people = null;
+            await loadPeople(true);
             showToast(data.name + ' saved successfully.', 'success');
             return id;
         } catch (error) {
@@ -153,6 +164,7 @@
         try {
             await db.collection('people').doc(id).delete();
             state.people = null;
+            await loadPeople(true);
             showToast('Person removed.', 'success');
             return true;
         } catch (error) {
@@ -190,7 +202,6 @@
             return trips;
         } catch (error) {
             console.error('Error loading trips:', error);
-            showToast('Failed to load trips.', 'danger');
             return [];
         }
     }
@@ -208,7 +219,14 @@
     async function saveTrip(data) {
         try {
             const id = data.id || generateId();
-            const tripData = { ...data, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+            const tripData = {
+                ...data,
+                actualDistance: parseFloat(data.actualDistance || data.finalRouteDistance || 0),
+                actualRouteDistance: parseFloat(data.actualRouteDistance || data.actualDistance || 0),
+                finalRouteDistance: parseFloat(data.finalRouteDistance || data.actualDistance || 0),
+                distanceSource: data.distanceSource || 'manual',
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
             if (!data.id) tripData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
             delete tripData.id;
             await db.collection('trips').doc(id).set(tripData, { merge: true });
@@ -223,10 +241,16 @@
 
     async function updateTrip(id, data) {
         try {
-            await db.collection('trips').doc(id).update({
+            const tripData = {
                 ...data,
+                actualDistance: parseFloat(data.actualDistance || data.finalRouteDistance || 0),
+                actualRouteDistance: parseFloat(data.actualRouteDistance || data.actualDistance || 0),
+                finalRouteDistance: parseFloat(data.finalRouteDistance || data.actualDistance || 0),
+                distanceSource: data.distanceSource || 'manual',
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            };
+            delete tripData.id;
+            await db.collection('trips').doc(id).update(tripData);
             return true;
         } catch (error) {
             console.error('Error updating trip:', error);
@@ -292,66 +316,193 @@
         }
     }
 
-    // ── Calculation Engine ────────────────────────────────────
+    // ============================================================
+    // ── Centralized Calculation Engine ──────────────────────────
+    // ============================================================
+
+    /**
+     * Calculate fuel used in litres: Distance / Mileage
+     */
     function calculateFuelUsed(distance, mileage) {
         if (!mileage || mileage <= 0 || !distance || distance <= 0) return 0;
         return parseFloat((distance / mileage).toFixed(2));
     }
 
+    /**
+     * Calculate total fuel cost: Fuel Used × Petrol Price
+     */
     function calculateFuelCost(distance, mileage, petrolPrice) {
         var fuel = calculateFuelUsed(distance, mileage);
         return parseFloat((fuel * petrolPrice).toFixed(2));
     }
 
     /**
-     * Calculate each passenger's share of the fuel cost.
-     * @param {number} totalCost - Total fuel cost for the trip
-     * @param {Array} passengers - Array of passenger objects or IDs
-     * @param {string} mode - Sharing mode: equal | passenger-only | custom-percentage | custom-amount
-     * @param {Object} customData - { percentages: {id: pct}, amounts: {id: amt} }
-     * @returns {Object} shares keyed by passenger id
+     * Calculate the rate per kilometer based on petrol price and mileage: Petrol Price / Mileage
+     * Example: ₹105 / 12 km/l = ₹8.75 per km
      */
-    function calculateShares(totalCost, passengers, mode, customData) {
+    function calculateRatePerKm(petrolPrice, mileage) {
+        if (!mileage || mileage <= 0 || !petrolPrice || petrolPrice <= 0) return 0;
+        return parseFloat((petrolPrice / mileage).toFixed(2));
+    }
+
+    /**
+     * Calculate passenger-specific distance object.
+     * Checks if manual distance is provided; otherwise uses pickup distance or home-to-office distance.
+     * @param {Object|string} passenger - Passenger object or ID
+     * @param {Object} options - { manualDistance, tripType, pickupDistance }
+     * @returns {Object} { passengerId, passengerName, calculatedDistance, manualDistance, finalDistance, distanceSource }
+     */
+    function calculatePassengerDistance(passenger, options) {
+        options = options || {};
+        let pObj = typeof passenger === 'string' ? (getPeople().find(p => p.id === passenger) || { id: passenger, name: passenger, distance: 0 }) : passenger;
+        
+        const baseDistance = parseFloat(pObj.pickupDistance !== undefined ? pObj.pickupDistance : (pObj.distance || 0));
+        let multiplier = 1;
+        if (options.tripType === 'Full Day') multiplier = 2;
+        else if (options.tripType === 'Custom' && options.multiplier) multiplier = options.multiplier;
+
+        const calculatedDistance = parseFloat((baseDistance * multiplier).toFixed(1));
+        
+        let manualDistance = null;
+        let finalDistance = calculatedDistance;
+        let distanceSource = 'calculated';
+
+        if (options.manualDistance !== undefined && options.manualDistance !== null && options.manualDistance !== '' && !isNaN(parseFloat(options.manualDistance))) {
+            manualDistance = parseFloat(parseFloat(options.manualDistance).toFixed(1));
+            finalDistance = manualDistance;
+            distanceSource = 'manual';
+        }
+
+        return {
+            passengerId: pObj.id,
+            passengerName: pObj.name,
+            pickupLocation: pObj.pickupLocation || pObj.homeLocation || `${pObj.name} Pickup`,
+            calculatedDistance: calculatedDistance,
+            manualDistance: manualDistance,
+            finalDistance: finalDistance,
+            distanceSource: distanceSource
+        };
+    }
+
+    /**
+     * Calculate passenger-specific chargeable distance based on route and trip parameters.
+     */
+    function calculateChargeableDistance(passengerDistanceInfo, tripType) {
+        if (!passengerDistanceInfo) return 0;
+        return parseFloat((passengerDistanceInfo.finalDistance || passengerDistanceInfo.distance || 0).toFixed(1));
+    }
+
+    /**
+     * Calculate route distance for the vehicle.
+     * Distinguishes between driver home-to-office, multi-stop pickup route, and manual overrides.
+     * @param {string} tripType - Office | Return | Full Day | Custom
+     * @param {number} driverDistance - Driver's base distance
+     * @param {Array} passengerDistances - Optional list of passenger distance objects
+     * @param {Object} options - { manualRouteDistance }
+     */
+    function calculateRouteDistance(tripType, driverDistance, passengerDistances, options) {
+        options = options || {};
+        if (options.manualRouteDistance !== undefined && options.manualRouteDistance !== null && !isNaN(parseFloat(options.manualRouteDistance))) {
+            return parseFloat(parseFloat(options.manualRouteDistance).toFixed(1));
+        }
+
+        driverDistance = parseFloat(driverDistance || getDriver()?.distance || 17);
+        return getDefaultDistance(tripType, driverDistance);
+    }
+
+    /**
+     * Calculate each passenger's share of the fuel cost across all 5 modes:
+     * 1. distance / distance-based: Passenger Charge = Passenger Chargeable Distance × Rate Per KM
+     * 2. equal: Total Trip Cost / (Passengers + Driver)
+     * 3. passenger-only: Total Trip Cost / Passengers
+     * 4. custom-percentage: Total Trip Cost × (Percentage / 100)
+     * 5. custom-amount: Manually entered amount
+     *
+     * @param {number} totalCost - Total fuel cost for the trip
+     * @param {Array} passengers - Array of passenger IDs or objects
+     * @param {string} mode - Sharing mode
+     * @param {Object} customData - { percentages: {}, amounts: {}, passengerDistances: {} }
+     * @param {Object} meta - { ratePerKm, petrolPrice, mileage, actualDistance }
+     * @returns {Object} shares keyed by passenger ID
+     */
+    function calculateShares(totalCost, passengers, mode, customData, meta) {
         var shares = {};
         if (!passengers || passengers.length === 0) return shares;
         customData = customData || {};
+        meta = meta || {};
 
-        switch (mode) {
+        const settings = getSettings();
+        const petrolPrice = meta.petrolPrice || settings.petrolPrice || 105;
+        const mileage = meta.mileage || settings.mileage || 12;
+        const ratePerKm = meta.ratePerKm || calculateRatePerKm(petrolPrice, mileage);
+
+        const normalizedMode = (mode || settings.sharingMode || 'distance').toLowerCase();
+
+        switch (normalizedMode) {
+            case 'distance':
+            case 'distance-based':
+            case 'distance_based': {
+                passengers.forEach(function (p) {
+                    const pid = p.id || p;
+                    let chargeableDist = 0;
+
+                    if (customData.passengerDistances && customData.passengerDistances[pid] !== undefined) {
+                        chargeableDist = parseFloat(customData.passengerDistances[pid]);
+                    } else if (p.finalDistance !== undefined) {
+                        chargeableDist = parseFloat(p.finalDistance);
+                    } else if (p.chargeableDistance !== undefined) {
+                        chargeableDist = parseFloat(p.chargeableDistance);
+                    } else {
+                        const pObj = getPeople().find(x => x.id === pid);
+                        chargeableDist = pObj ? parseFloat(pObj.pickupDistance || pObj.distance || 0) : 0;
+                    }
+
+                    // Chargeable Distance × Rate per KM
+                    const charge = parseFloat((chargeableDist * ratePerKm).toFixed(2));
+                    shares[pid] = charge;
+                });
+                break;
+            }
             case 'equal': {
                 var totalPeople = passengers.length + 1; // driver included
-                var perPerson = totalCost / totalPeople;
+                var perPerson = parseFloat((totalCost / totalPeople).toFixed(2));
                 passengers.forEach(function (p) {
-                    shares[p.id || p] = parseFloat(perPerson.toFixed(2));
+                    shares[p.id || p] = perPerson;
                 });
                 break;
             }
-            case 'passenger-only': {
-                var perPassenger = totalCost / passengers.length;
+            case 'passenger-only':
+            case 'passenger_only': {
+                var perPassenger = parseFloat((totalCost / passengers.length).toFixed(2));
                 passengers.forEach(function (p) {
-                    shares[p.id || p] = parseFloat(perPassenger.toFixed(2));
+                    shares[p.id || p] = perPassenger;
                 });
                 break;
             }
-            case 'custom-percentage': {
+            case 'custom-percentage':
+            case 'custom_percentage': {
                 passengers.forEach(function (p) {
                     var pid = p.id || p;
-                    var pct = (customData.percentages && customData.percentages[pid]) || 0;
+                    var pct = (customData.percentages && customData.percentages[pid]) || (settings.customPercentages && settings.customPercentages[pid]) || 0;
                     shares[pid] = parseFloat((totalCost * pct / 100).toFixed(2));
                 });
                 break;
             }
-            case 'custom-amount': {
+            case 'custom-amount':
+            case 'custom_amount': {
                 passengers.forEach(function (p) {
                     var pid = p.id || p;
-                    shares[pid] = (customData.amounts && customData.amounts[pid]) || 0;
+                    shares[pid] = parseFloat(((customData.amounts && customData.amounts[pid]) || 0).toFixed(2));
                 });
                 break;
             }
             default: {
-                var fp = passengers.length + 1;
-                var pp = totalCost / fp;
+                // Default to distance based if available, otherwise equal split
                 passengers.forEach(function (p) {
-                    shares[p.id || p] = parseFloat(pp.toFixed(2));
+                    const pid = p.id || p;
+                    const pObj = getPeople().find(x => x.id === pid);
+                    const dist = pObj ? (pObj.pickupDistance || pObj.distance || 0) : 0;
+                    shares[pid] = parseFloat((dist * ratePerKm).toFixed(2));
                 });
             }
         }
@@ -365,12 +516,13 @@
      * @returns {number} Default total distance
      */
     function getDefaultDistance(tripType, driverDistance) {
+        const d = parseFloat(driverDistance || getDriver()?.distance || 17);
         switch (tripType) {
-            case 'Office': return driverDistance;           // one way
-            case 'Return': return driverDistance;            // one way (return leg)
-            case 'Full Day': return driverDistance * 2;      // round trip
+            case 'Office': return d;           // one way
+            case 'Return': return d;           // one way (return leg)
+            case 'Full Day': return parseFloat((d * 2).toFixed(1)); // round trip
             case 'Custom': return 0;
-            default: return driverDistance;
+            default: return d;
         }
     }
 
@@ -426,11 +578,11 @@
         var seconds = Math.floor((Date.now() - timestamp) / 1000);
         if (seconds < 0) seconds = 0;
         if (seconds < 10) return 'Just now';
-        if (seconds < 60) return seconds + ' seconds ago';
+        if (seconds < 60) return seconds + 's ago';
         var minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return minutes + ' minute' + (minutes !== 1 ? 's' : '') + ' ago';
+        if (minutes < 60) return minutes + 'm ago';
         var hours = Math.floor(minutes / 60);
-        return hours + ' hour' + (hours !== 1 ? 's' : '') + ' ago';
+        return hours + 'h ago';
     }
 
     // ── Navigation ────────────────────────────────────────────
@@ -459,7 +611,7 @@
             '<span>Carpool</span></div>' +
             '<nav class="sidebar-nav">' + navLinks + '</nav>' +
             '<div class="sidebar-footer">' +
-            '<small class="text-muted">Carpool Tracker v1.0</small></div>';
+            '<small class="text-muted">Carpool Tracker v2.0</small></div>';
     }
 
     function renderTopBar(activePage) {
@@ -503,7 +655,6 @@
             '<a href="#" class="bottom-nav-item ' + moreActive + '" data-bs-toggle="offcanvas" data-bs-target="#moreMenuOffcanvas">' +
             '<i class="bi bi-three-dots"></i><span>More</span></a>';
 
-        // Create offcanvas for "More" menu
         if (!document.getElementById('moreMenuOffcanvas')) {
             var moreItems = NAV_ITEMS.filter(function (i) { return !i.bottomNav; });
             var moreLinks = moreItems.map(function (item) {
@@ -555,11 +706,11 @@
 
     function escapeHtml(str) {
         var div = document.createElement('div');
-        div.appendChild(document.createTextNode(str));
+        div.appendChild(document.createTextNode(str || ''));
         return div.innerHTML;
     }
 
-    // ── WhatsApp ──────────────────────────────────────────────
+    // ── WhatsApp Deep Link Helper ─────────────────────────────
     function openWhatsApp(phone, message) {
         var cleanPhone = (phone || '').replace(/[^0-9]/g, '');
         var encoded = encodeURIComponent(message);
@@ -567,12 +718,13 @@
             ? 'https://wa.me/' + cleanPhone + '?text=' + encoded
             : 'https://wa.me/?text=' + encoded;
         window.open(url, '_blank');
+        showToast('WhatsApp opened. Please press Send in WhatsApp.', 'info');
     }
 
     async function copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
-            showToast('Copied to clipboard!', 'success');
+            showToast('Message Copied to clipboard!', 'success');
         } catch (e) {
             var ta = document.createElement('textarea');
             ta.value = text;
@@ -582,7 +734,7 @@
             ta.select();
             document.execCommand('copy');
             document.body.removeChild(ta);
-            showToast('Copied to clipboard!', 'success');
+            showToast('Message Copied to clipboard!', 'success');
         }
     }
 
@@ -600,7 +752,6 @@
             })
         ].join('\r\n');
 
-        // BOM prefix for Excel UTF-8 compatibility
         var blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
         downloadBlob(blob, filename);
     }
@@ -715,10 +866,8 @@
         try {
             if (!data || !data.settings) throw new Error('Invalid backup file');
 
-            // Restore settings
             await db.collection('settings').doc('car').set(data.settings);
 
-            // Restore people
             if (data.people && data.people.length > 0) {
                 for (var p of data.people) {
                     var pid = p.id;
@@ -727,7 +876,6 @@
                 }
             }
 
-            // Restore trips
             if (data.trips && data.trips.length > 0) {
                 for (var t of data.trips) {
                     var tid = t.id;
@@ -736,7 +884,6 @@
                 }
             }
 
-            // Restore payments
             if (data.payments && data.payments.length > 0) {
                 for (var pay of data.payments) {
                     var payId = pay.id;
@@ -745,7 +892,6 @@
                 }
             }
 
-            // Clear caches
             state.settings = null;
             state.people = null;
 
@@ -760,8 +906,6 @@
     // ── App Initialization ────────────────────────────────────
     async function init(activePage, pageInitFn, options) {
         options = options || {};
-
-        // Online/offline detection
         setupConnectivityListeners();
 
         if (options.skipAuth) {
@@ -780,7 +924,6 @@
             if (pageInitFn) await pageInitFn();
         } catch (error) {
             console.error('App init error:', error);
-            showToast('Failed to initialize. Check your Firebase configuration.', 'danger');
             initNavigation(activePage);
             if (pageInitFn) await pageInitFn();
         }
@@ -824,9 +967,13 @@
         // Payments
         getPayments: getPayments, savePayment: savePayment, deletePayment: deletePayment,
 
-        // Calculations
+        // Calculation Engine
         calculateFuelUsed: calculateFuelUsed,
         calculateFuelCost: calculateFuelCost,
+        calculateRatePerKm: calculateRatePerKm,
+        calculatePassengerDistance: calculatePassengerDistance,
+        calculateChargeableDistance: calculateChargeableDistance,
+        calculateRouteDistance: calculateRouteDistance,
         calculateShares: calculateShares,
         getDefaultDistance: getDefaultDistance,
 

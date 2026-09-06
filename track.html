@@ -9,51 +9,71 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link href="css/style.css" rel="stylesheet">
+    <style>
+        .live-pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            background-color: #06d6a0;
+            box-shadow: 0 0 0 rgba(6, 214, 160, 0.4);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(6, 214, 160, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(6, 214, 160, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(6, 214, 160, 0); }
+        }
+    </style>
 </head>
 <body class="track-page">
     <!-- Track Header -->
     <header class="track-header">
-        <div class="brand"><i class="bi bi-car-front-fill"></i> Carpool Tracker</div>
+        <div class="brand"><i class="bi bi-car-front-fill text-primary"></i> Carpool Live Tracker</div>
         <span id="trackLiveBadge" class="live-badge d-none"><span class="live-dot"></span> LIVE</span>
     </header>
 
     <!-- Trip Info Bar -->
     <div class="track-info-bar" id="tripInfoBar">
-        <div class="track-info-item"><i class="bi bi-person-fill"></i> Driver: <strong id="trackDriverName">—</strong></div>
-        <div class="track-info-item"><i class="bi bi-flag-fill"></i> Status: <strong id="trackStatus">Loading...</strong></div>
-        <div class="track-info-item"><i class="bi bi-clock"></i> Started: <strong id="trackStartTime">—</strong></div>
-        <div class="track-info-item"><i class="bi bi-arrow-repeat"></i> Updated: <strong id="trackLastUpdated">—</strong></div>
-        <div class="track-info-item" id="trackAccuracyRow"><i class="bi bi-geo-alt"></i> GPS: <span id="trackAccuracy" class="gps-accuracy">—</span></div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="track-info-item mb-0"><i class="bi bi-person-fill text-primary"></i> Driver: <strong id="trackDriverName" class="ms-1">—</strong></div>
+            <div id="liveStatusPill"><span class="badge bg-success"><span class="live-pulse-dot me-1"></span> Live</span></div>
+        </div>
+        <div class="track-info-item"><i class="bi bi-geo-alt-fill text-danger"></i> Route: <strong id="trackRouteDistance" class="ms-1">—</strong></div>
+        <div class="track-info-item"><i class="bi bi-clock"></i> Started: <span id="trackStartTime" class="ms-1">—</span></div>
+        <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+            <div class="track-info-item mb-0"><i class="bi bi-arrow-repeat"></i> Updated: <strong id="trackLastUpdated" class="ms-1">Just now</strong></div>
+            <div class="track-info-item mb-0"><span id="trackAccuracy" class="gps-accuracy good">GPS: ±--m</span></div>
+        </div>
+        <div id="gpsWarning" class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-none"><i class="bi bi-exclamation-triangle"></i> GPS accuracy is low.</div>
     </div>
 
-    <!-- Map -->
-    <div id="trackMap" class="track-map" style="margin:0.75rem; height: 400px;"></div>
+    <!-- Map Container -->
+    <div id="trackMap" class="track-map" style="margin: 0.75rem; height: calc(100vh - 270px); min-height: 350px; border-radius: 16px; z-index: 1;"></div>
 
     <!-- Error/Ended state -->
     <div id="trackError" class="empty-state d-none text-center p-5">
-        <i class="bi bi-exclamation-triangle" style="font-size: 3rem;"></i>
-        <h5 id="trackErrorTitle">Trip Not Found</h5>
-        <p id="trackErrorMsg">This tracking link is invalid or the trip has ended.</p>
+        <i class="bi bi-check-circle-fill text-success" style="font-size: 3.5rem;" id="trackErrorIcon"></i>
+        <h5 id="trackErrorTitle" class="mt-3 fw-bold">Trip Ended</h5>
+        <p id="trackErrorMsg" class="text-muted">The driver has completed this carpool trip.</p>
+        <a href="index.html" class="btn btn-outline-primary rounded-pill mt-2">Go to Carpool Home</a>
     </div>
 
     <!-- Offline Banner -->
-    <div id="offlineBanner" class="offline-banner d-none p-2 bg-danger text-white text-center">
-        <i class="bi bi-wifi-off me-1"></i> Internet connection unavailable.
+    <div id="offlineBanner" class="offline-banner d-none p-2 bg-warning text-dark text-center fw-bold">
+        <i class="bi bi-wifi-off me-1"></i> Internet connection unavailable. Live location update paused.
     </div>
 
     <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1090;"></div>
 
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="js/firebase-config.js"></script>
-    <script src="js/app.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Handle offline status
+            // Connectivity handling
             window.addEventListener('online', () => document.getElementById('offlineBanner').classList.add('d-none'));
             window.addEventListener('offline', () => document.getElementById('offlineBanner').classList.remove('d-none'));
             if (!navigator.onLine) {
@@ -67,22 +87,32 @@
             const liveBadge = document.getElementById('trackLiveBadge');
             
             const driverNameEl = document.getElementById('trackDriverName');
-            const statusEl = document.getElementById('trackStatus');
+            const routeDistanceEl = document.getElementById('trackRouteDistance');
             const startTimeEl = document.getElementById('trackStartTime');
             const lastUpdatedEl = document.getElementById('trackLastUpdated');
             const accuracyEl = document.getElementById('trackAccuracy');
+            const gpsWarningEl = document.getElementById('gpsWarning');
+            const liveStatusPillEl = document.getElementById('liveStatusPill');
 
-            function showError(title, msg) {
+            function showError(title, msg, isSuccess) {
                 mapContainer.classList.add('d-none');
                 infoBar.classList.add('d-none');
                 liveBadge.classList.add('d-none');
                 errorContainer.classList.remove('d-none');
+                
+                const icon = document.getElementById('trackErrorIcon');
+                if (isSuccess) {
+                    icon.className = 'bi bi-check-circle-fill text-success';
+                } else {
+                    icon.className = 'bi bi-exclamation-triangle text-warning';
+                }
+
                 document.getElementById('trackErrorTitle').textContent = title;
                 document.getElementById('trackErrorMsg').textContent = msg;
             }
 
             if (!tripId) {
-                showError('Trip Not Found', 'No trip ID was provided in the URL.');
+                showError('Trip Not Found', 'No trip ID was provided in the tracking URL.', false);
                 return;
             }
 
@@ -101,52 +131,66 @@
                 return `${mins}m ago`;
             }
 
-            // Start update timer for time ago string
+            // Realtime time-ago updater
             updateTimer = setInterval(() => {
                 if (lastUpdateTimestamp) {
+                    const elapsed = Math.floor((Date.now() - lastUpdateTimestamp) / 1000);
                     lastUpdatedEl.textContent = formatTimeAgo(lastUpdateTimestamp);
+                    
+                    if (elapsed > 40) {
+                        liveStatusPillEl.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-clock-history me-1"></i> Location updating slowly</span>';
+                    } else {
+                        liveStatusPillEl.innerHTML = '<span class="badge bg-success"><span class="live-pulse-dot me-1"></span> Live</span>';
+                    }
+
                     if (marker && marker.getPopup() && marker.getPopup().isOpen()) {
-                        marker.setPopupContent(`<b>${driverNameEl.textContent}</b><br/>Last updated: ${formatTimeAgo(lastUpdateTimestamp)}`);
+                        marker.setPopupContent(`<b>🚗 ${driverNameEl.textContent}'s Car</b><br/>Updated: ${formatTimeAgo(lastUpdateTimestamp)}`);
                     }
                 }
             }, 1000);
 
-            // Connect to Firebase RTDB
-            const db = firebase.database();
-            const tripRef = db.ref('liveTrips/' + tripId);
+            // Connect to Firebase Realtime Database
+            const rtdb = firebase.database();
+            const tripRef = rtdb.ref('liveTrips/' + tripId);
 
             tripRef.on('value', (snapshot) => {
                 const data = snapshot.val();
                 
-                if (!data || data.status !== 'active') {
-                    showError('Trip Ended', 'This trip has ended or cannot be found.');
+                if (!data) {
+                    showError('Trip Completed', 'This live trip has completed or the tracking session has ended.', true);
                     tripRef.off('value');
                     clearInterval(updateTimer);
                     return;
                 }
 
-                if (data.expiresAt < Date.now()) {
-                    showError('Link Expired', 'This tracking link has expired.');
+                if (data.status === 'completed') {
+                    showError('Trip Completed', `Trip completed by ${data.driverName || 'driver'}. Thank you for carpooling!`, true);
                     tripRef.off('value');
                     clearInterval(updateTimer);
                     return;
                 }
 
-                // Update UI elements
-                driverNameEl.textContent = data.driverName || 'Unknown';
-                statusEl.textContent = 'Active';
-                lastUpdateTimestamp = data.timestamp;
-                lastUpdatedEl.textContent = formatTimeAgo(lastUpdateTimestamp);
+                if (data.expiresAt && Date.now() > data.expiresAt) {
+                    showError('Trip Session Expired', 'This live tracking link has expired.', false);
+                    tripRef.off('value');
+                    clearInterval(updateTimer);
+                    return;
+                }
+
+                // Update Trip metadata
+                driverNameEl.textContent = data.driverName || 'Vivek';
+                routeDistanceEl.textContent = data.actualRouteDistance ? `${data.actualRouteDistance} km` : 'Active Route';
                 liveBadge.classList.remove('d-none');
+                
+                lastUpdateTimestamp = data.timestamp || Date.now();
+                lastUpdatedEl.textContent = formatTimeAgo(lastUpdateTimestamp);
                 
                 if (data.startTime) {
                     const d = new Date(data.startTime);
-                    startTimeEl.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                } else {
-                    startTimeEl.textContent = '—';
+                    startTimeEl.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 }
 
-                // Update accuracy display
+                // Accuracy indicators
                 const acc = data.accuracy;
                 if (acc !== undefined && acc !== null) {
                     let className = 'poor';
@@ -154,37 +198,49 @@
                     if (acc < 30) {
                         className = 'good';
                         text = `±${Math.round(acc)}m (Good)`;
+                        gpsWarningEl.classList.add('d-none');
                     } else if (acc <= 100) {
                         className = 'medium';
                         text = `±${Math.round(acc)}m (Fair)`;
+                        gpsWarningEl.classList.add('d-none');
+                    } else {
+                        gpsWarningEl.classList.remove('d-none');
                     }
-                    accuracyEl.className = `gps-accuracy text-${className === 'good' ? 'success' : (className === 'medium' ? 'warning' : 'danger')}`;
-                    accuracyEl.textContent = text;
+                    accuracyEl.className = `gps-accuracy ${className}`;
+                    accuracyEl.textContent = `GPS: ${text}`;
                 }
 
                 const lat = data.lat;
                 const lng = data.lng;
 
-                if (!map && lat && lng) {
-                    // Initialize Map
-                    map = L.map('trackMap').setView([lat, lng], 15);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '&copy; OpenStreetMap contributors'
-                    }).addTo(map);
+                if (lat && lng) {
+                    if (!map) {
+                        map = L.map('trackMap').setView([lat, lng], 15);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '&copy; OpenStreetMap contributors'
+                        }).addTo(map);
 
-                    marker = L.marker([lat, lng]).addTo(map);
-                    marker.bindPopup(`<b>${data.driverName || 'Driver'}</b><br/>Last updated: Just now`);
+                        const carIcon = L.divIcon({
+                            className: 'custom-car-marker',
+                            html: '<div style="background:#4361ee;color:#fff;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(67,97,238,0.5);border:3px solid white;"><i class="bi bi-car-front-fill" style="font-size:18px;"></i></div>',
+                            iconSize: [38, 38],
+                            iconAnchor: [19, 19]
+                        });
 
-                    map.on('dragstart', () => { userPanned = true; });
-                } else if (map && lat && lng) {
-                    marker.setLatLng([lat, lng]);
-                    if (!userPanned) {
-                        map.setView([lat, lng]);
+                        marker = L.marker([lat, lng], { icon: carIcon }).addTo(map);
+                        marker.bindPopup(`<b>🚗 ${data.driverName || 'Vivek'}'s Car</b><br/>Live Location`).openPopup();
+
+                        map.on('dragstart', () => { userPanned = true; });
+                    } else {
+                        marker.setLatLng([lat, lng]);
+                        if (!userPanned) {
+                            map.setView([lat, lng], map.getZoom());
+                        }
                     }
                 }
             }, (error) => {
-                showError('Error', 'Failed to connect to tracking data. Please try again.');
-                console.error(error);
+                console.error("Tracking RTDB error:", error);
+                showError('Connection Error', 'Unable to stream live location. Please check your internet connection.', false);
             });
         });
     </script>

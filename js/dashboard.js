@@ -1,22 +1,35 @@
-// js/dashboard.js
+// ============================================================
+// js/dashboard.js — Main Dashboard Logic
+// ============================================================
 
-async function initDashboard() {
+let mapInstance = null;
+let mapMarker = null;
+let activeTripListenerCleanup = null;
+let startTripModalInstance = null;
+let endTripModalInstance = null;
+
+CarpoolApp.init('dashboard', async function() {
+    startTripModalInstance = new bootstrap.Modal(document.getElementById('startTripModal'));
+    endTripModalInstance = new bootstrap.Modal(document.getElementById('endTripModal'));
+
     await renderStatCards();
     renderCurrentTripSection();
     renderQuickTripEntry();
-    
-    // Refresh stats and live trip section periodically
+    renderDebugPanel();
+
+    // Auto-refresh stats and live tracking state periodically
     setInterval(() => {
         if (window.CarpoolTracker.isTracking()) {
             updateLiveTripUI();
         }
     }, 10000);
-}
+});
 
 async function renderStatCards() {
     const { month, year } = window.CarpoolApp.getCurrentMonthYear();
     const trips = await window.CarpoolApp.getTrips({ month, year }) || [];
-    const passengers = window.CarpoolApp.getPassengers();
+    const passengers = window.CarpoolApp.getPassengers() || [];
+    const settings = window.CarpoolApp.getSettings();
     
     let totalTrips = trips.length;
     let totalKm = 0;
@@ -27,66 +40,68 @@ async function renderStatCards() {
     passengers.forEach(p => passengerShares[p.id] = 0);
     
     trips.forEach(t => {
-        totalKm += (t.actualDistance || 0);
-        totalFuelUsed += (t.fuelUsed || 0);
-        totalFuelCost += (t.fuelCost || 0);
+        totalKm += parseFloat(t.actualDistance || t.actualRouteDistance || 0);
+        totalFuelUsed += parseFloat(t.fuelUsed || 0);
+        totalFuelCost += parseFloat(t.fuelCost || 0);
         
         if (t.passengerShares) {
             for (let pid in t.passengerShares) {
                 if (passengerShares[pid] !== undefined) {
-                    passengerShares[pid] += t.passengerShares[pid];
+                    passengerShares[pid] += parseFloat(t.passengerShares[pid] || 0);
                 }
             }
         }
     });
 
     let statCardsHtml = `
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-4 col-lg-2">
             <div class="stat-card">
-                <div class="stat-icon bg-blue"><i class="bi bi-car-front"></i></div>
+                <div class="stat-icon bg-blue"><i class="bi bi-car-front-fill"></i></div>
                 <div class="stat-label">Total Trips</div>
                 <div class="stat-value" id="statTotalTrips">${totalTrips}</div>
                 <div class="stat-sub">This month</div>
             </div>
         </div>
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-4 col-lg-2">
             <div class="stat-card">
-                <div class="stat-icon bg-teal"><i class="bi bi-geo-alt"></i></div>
+                <div class="stat-icon bg-teal"><i class="bi bi-geo-alt-fill"></i></div>
                 <div class="stat-label">Total KM</div>
                 <div class="stat-value">${totalKm.toFixed(1)}</div>
-                <div class="stat-sub">This month</div>
+                <div class="stat-sub">Car distance</div>
             </div>
         </div>
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-4 col-lg-2">
             <div class="stat-card">
-                <div class="stat-icon bg-orange"><i class="bi bi-fuel-pump"></i></div>
+                <div class="stat-icon bg-orange"><i class="bi bi-fuel-pump-fill"></i></div>
                 <div class="stat-label">Fuel Used</div>
                 <div class="stat-value">${totalFuelUsed.toFixed(1)} L</div>
-                <div class="stat-sub">This month</div>
+                <div class="stat-sub">@ ${settings.mileage || 12} km/l</div>
             </div>
         </div>
-        <div class="col-6 col-md-4">
+        <div class="col-6 col-md-4 col-lg-2">
             <div class="stat-card">
                 <div class="stat-icon bg-green"><i class="bi bi-currency-rupee"></i></div>
                 <div class="stat-label">Fuel Cost</div>
                 <div class="stat-value">${window.CarpoolApp.formatCurrencyShort(totalFuelCost)}</div>
-                <div class="stat-sub">This month</div>
+                <div class="stat-sub">@ ₹${settings.petrolPrice || 105}/L</div>
             </div>
         </div>
     `;
 
-    // Dynamic passenger due cards (max 2)
-    const activePax = passengers.slice(0, 2);
+    // Dynamic passenger due cards for active passengers
+    const activePax = passengers.filter(p => p.active !== false);
+    const colors = ['bg-purple', 'bg-pink', 'bg-cyan', 'bg-orange'];
+
     activePax.forEach((p, index) => {
-        const colorClass = index === 0 ? 'bg-purple' : 'bg-pink';
+        const colorClass = colors[index % colors.length];
         const amount = passengerShares[p.id] || 0;
         statCardsHtml += `
-            <div class="col-6 col-md-4">
+            <div class="col-6 col-md-4 col-lg-2">
                 <div class="stat-card">
-                    <div class="stat-icon ${colorClass}"><i class="bi bi-person"></i></div>
-                    <div class="stat-label">${p.name} Due</div>
-                    <div class="stat-value">${window.CarpoolApp.formatCurrencyShort(amount)}</div>
-                    <div class="stat-sub">pending</div>
+                    <div class="stat-icon ${colorClass}"><i class="bi bi-person-fill"></i></div>
+                    <div class="stat-label text-truncate" style="max-width: 100%;">${window.CarpoolApp.escapeHtml(p.name)} Due</div>
+                    <div class="stat-value">${window.CarpoolApp.formatCurrency(amount)}</div>
+                    <div class="stat-sub">${p.pickupDistance || p.distance || 0}km default</div>
                 </div>
             </div>
         `;
@@ -94,8 +109,6 @@ async function renderStatCards() {
     
     document.getElementById('statCards').innerHTML = statCardsHtml;
 }
-
-let activeTripListenerCleanup = null;
 
 function renderCurrentTripSection() {
     const container = document.getElementById('currentTripSection');
@@ -107,6 +120,11 @@ function renderCurrentTripSection() {
             activeTripListenerCleanup();
             activeTripListenerCleanup = null;
         }
+        if (mapInstance) {
+            mapInstance.remove();
+            mapInstance = null;
+            mapMarker = null;
+        }
         container.innerHTML = `
             <button class="btn-start-trip" id="btnStartTrip">
                 <i class="bi bi-broadcast me-2"></i> START LIVE TRIP
@@ -117,41 +135,54 @@ function renderCurrentTripSection() {
         if (!document.getElementById('activeTripCard')) {
             container.innerHTML = `
                 <div class="card shadow-sm border-0 rounded-4" id="activeTripCard">
-                    <div class="card-body">
+                    <div class="card-body p-4">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h5 class="card-title mb-0 d-flex align-items-center">
+                            <h5 class="card-title mb-0 d-flex align-items-center fw-bold">
                                 <span class="spinner-grow spinner-grow-sm text-danger me-2" role="status"></span>
-                                Live Trip
+                                Live Trip in Progress
                             </h5>
-                            <span class="badge bg-danger rounded-pill">LIVE</span>
-                        </div>
-                        <div id="liveTripPassengers" class="mb-3 d-flex flex-wrap gap-2"></div>
-                        <div id="map-container" class="map-container rounded-3 mb-3" style="height: 300px; width: 100%; background: #eee; z-index: 1;"></div>
-                        
-                        <div class="d-flex justify-content-between text-muted small mb-3">
-                            <span id="gpsAccuracy"><i class="bi bi-crosshair"></i> Waiting for GPS...</span>
-                            <span id="lastUpdated"><i class="bi bi-clock"></i> Just now</span>
+                            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
                         </div>
                         
-                        <div class="d-grid gap-2" id="shareButtons">
-                            <!-- Populated dynamically -->
+                        <div class="bg-light rounded-3 p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted small">Passengers in Trip:</span>
+                                <div id="liveTripPassengers" class="d-flex flex-wrap gap-2"></div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center text-muted small pt-2 border-top">
+                                <span><i class="bi bi-geo-alt text-primary"></i> <span id="liveRouteDistance">--</span></span>
+                                <span id="liveGpsAccuracy" class="gps-accuracy good">GPS: Acquiring...</span>
+                                <span><i class="bi bi-clock"></i> <span id="liveLastUpdated">Just now</span></span>
+                            </div>
+                        </div>
+
+                        <div id="liveDashboardMap" class="map-container rounded-4 mb-3" style="height: 280px; width: 100%; background: #e9ecef; z-index: 1;"></div>
+                        
+                        <h6 class="fw-bold small text-muted text-uppercase mb-2">Share Live Tracking via WhatsApp</h6>
+                        <div class="row g-2 mb-3" id="shareButtonsContainer">
+                            <!-- Populated dynamically per passenger -->
                         </div>
                         
-                        <button class="btn btn-outline-danger w-100 mt-3 rounded-pill fw-bold" id="btnEndTrip">
-                            END TRIP
+                        <button class="btn btn-outline-danger w-100 rounded-pill fw-bold py-2" id="btnEndTrip">
+                            <i class="bi bi-stop-circle me-1"></i> END TRIP & SAVE SUMMARY
                         </button>
                     </div>
                 </div>
             `;
             
-            document.getElementById('btnEndTrip').addEventListener('click', async () => {
-                await window.CarpoolTracker.endTrip();
-                renderCurrentTripSection(); 
+            document.getElementById('btnEndTrip').addEventListener('click', () => {
+                endTripModalInstance.show();
             });
-            
-            // Initialize map for the driver view
-            activeTripListenerCleanup = window.CarpoolTracker.initPassengerView(tripId, 'map-container');
+
+            document.getElementById('btnConfirmEndTrip').onclick = async () => {
+                endTripModalInstance.hide();
+                await window.CarpoolTracker.endTrip();
+                renderCurrentTripSection();
+                await renderStatCards();
+                renderDebugPanel();
+            };
         }
+
         updateLiveTripUI();
     }
 }
@@ -160,138 +191,383 @@ function updateLiveTripUI() {
     const tripId = window.CarpoolTracker.getActiveTripId();
     if (!tripId) return;
 
-    window.CarpoolApp.rtdb.ref('liveTrips/' + tripId).once('value').then(snap => {
-        const data = snap.val();
-        if (data) {
-            const accEl = document.getElementById('gpsAccuracy');
-            const updEl = document.getElementById('lastUpdated');
-            if (accEl) accEl.innerHTML = `<i class="bi bi-crosshair"></i> Accuracy: ${Math.round(data.accuracy || 0)}m`;
-            if (updEl) updEl.innerHTML = `<i class="bi bi-clock"></i> Updated ${window.CarpoolApp.timeAgo(data.timestamp)}`;
-            
-            const paxContainer = document.getElementById('liveTripPassengers');
-            if (paxContainer && data.passengers) {
-                paxContainer.innerHTML = data.passengers.map(pName => 
-                    `<span class="badge bg-light text-dark border rounded-pill px-3 py-2"><i class="bi bi-person text-primary"></i> ${pName}</span>`
-                ).join('');
-                
-                const shareContainer = document.getElementById('shareButtons');
-                if (shareContainer && shareContainer.innerHTML.trim() === '') {
-                    const link = window.CarpoolTracker.generateShareLink(tripId);
-                    let shareHtml = '';
-                    
-                    data.passengers.forEach(pName => {
-                        const msg = window.CarpoolTracker.generateShareMessage(tripId, pName);
-                        const paxObj = window.CarpoolApp.getPassengers().find(p => p.name === pName);
-                        const phone = paxObj ? paxObj.phone : '';
-                        shareHtml += `
-                            <button class="btn btn-outline-success text-start rounded-pill" onclick="window.CarpoolApp.openWhatsApp('${phone}', '${encodeURIComponent(msg)}')">
-                                <i class="bi bi-whatsapp"></i> Share to ${pName}
-                            </button>
-                        `;
-                    });
-                    
-                    shareHtml += `
-                        <button class="btn btn-outline-secondary text-start rounded-pill" onclick="window.CarpoolApp.copyToClipboard('${link}')">
-                            <i class="bi bi-link-45deg"></i> Copy Link
+    window.CarpoolApp.rtdb.ref('liveTrips/' + tripId).on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (!data || data.status !== 'active') {
+            renderCurrentTripSection();
+            return;
+        }
+
+        const paxContainer = document.getElementById('liveTripPassengers');
+        if (paxContainer && data.passengers) {
+            paxContainer.innerHTML = data.passengers.map(pName => 
+                `<span class="badge bg-primary rounded-pill px-3 py-1"><i class="bi bi-person-fill me-1"></i> ${window.CarpoolApp.escapeHtml(pName)}</span>`
+            ).join('');
+        }
+
+        const routeDistEl = document.getElementById('liveRouteDistance');
+        if (routeDistEl) {
+            routeDistEl.textContent = `Route: ${data.actualRouteDistance || 19} km`;
+        }
+
+        const gpsEl = document.getElementById('liveGpsAccuracy');
+        if (gpsEl && data.accuracy) {
+            const acc = Math.round(data.accuracy);
+            gpsEl.textContent = `GPS: ±${acc}m`;
+            gpsEl.className = `gps-accuracy ${acc < 30 ? 'good' : (acc < 100 ? 'medium' : 'poor')}`;
+        }
+
+        const lastUpEl = document.getElementById('liveLastUpdated');
+        if (lastUpEl && data.timestamp) {
+            lastUpEl.textContent = window.CarpoolApp.timeAgo(data.timestamp);
+        }
+
+        // WhatsApp Share Buttons for each passenger
+        const shareContainer = document.getElementById('shareButtonsContainer');
+        if (shareContainer && data.passengers) {
+            const allPeople = window.CarpoolApp.getPeople();
+            const link = window.CarpoolTracker.generateShareLink(tripId);
+
+            let buttonsHtml = '';
+            data.passengers.forEach(pName => {
+                const pObj = allPeople.find(x => x.name.toLowerCase() === pName.toLowerCase() || x.id === pName);
+                const phone = pObj ? pObj.phone : '';
+                const msg = window.CarpoolTracker.generateShareMessage(tripId, pName);
+
+                buttonsHtml += `
+                    <div class="col-12 col-sm-6">
+                        <button class="btn btn-whatsapp w-100 rounded-pill py-2 shadow-sm text-start d-flex align-items-center justify-content-between" 
+                            onclick="window.CarpoolApp.openWhatsApp('${phone}', '${msg}')">
+                            <span><i class="bi bi-whatsapp me-2"></i> Share with <strong>${window.CarpoolApp.escapeHtml(pName)}</strong></span>
+                            <span class="badge bg-white text-success rounded-pill px-2 py-1 small">WhatsApp</span>
                         </button>
-                    `;
-                    shareContainer.innerHTML = shareHtml;
-                }
+                    </div>
+                `;
+            });
+
+            buttonsHtml += `
+                <div class="col-6">
+                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small" onclick="window.CarpoolApp.copyToClipboard('${window.CarpoolTracker.generateShareMessage(tripId, 'Passenger')}')">
+                        <i class="bi bi-clipboard me-1"></i> Copy Message
+                    </button>
+                </div>
+                <div class="col-6">
+                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small" onclick="window.CarpoolApp.copyToClipboard('${link}')">
+                        <i class="bi bi-link-45deg me-1"></i> Copy Link
+                    </button>
+                </div>
+            `;
+            shareContainer.innerHTML = buttonsHtml;
+        }
+
+        // Leaflet Map Rendering
+        const lat = data.lat;
+        const lng = data.lng;
+        const mapEl = document.getElementById('liveDashboardMap');
+
+        if (mapEl && lat && lng) {
+            if (!mapInstance) {
+                mapInstance = L.map('liveDashboardMap').setView([lat, lng], 15);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(mapInstance);
+
+                const carIcon = L.divIcon({
+                    className: 'custom-car-marker',
+                    html: '<div style="background:#4361ee;color:#fff;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(67,97,238,0.5);border:2px solid white;"><i class="bi bi-car-front-fill"></i></div>',
+                    iconSize: [34, 34],
+                    iconAnchor: [17, 17]
+                });
+
+                mapMarker = L.marker([lat, lng], { icon: carIcon }).addTo(mapInstance);
+                mapMarker.bindPopup(`<b>🚗 ${data.driverName}'s Car</b><br/>Live GPS`).openPopup();
+            } else {
+                mapMarker.setLatLng([lat, lng]);
+                mapInstance.setView([lat, lng]);
             }
         }
     });
 }
 
 function showStartTripModal() {
-    const passengers = window.CarpoolApp.getPassengers().filter(p => p.active);
-    const container = document.getElementById('startTripPassengers');
+    const passengers = window.CarpoolApp.getPassengers().filter(p => p.active !== false);
+    const driver = window.CarpoolApp.getDriver();
+    const settings = window.CarpoolApp.getSettings();
+    const petrolPrice = settings.petrolPrice || 105;
+    const mileage = settings.mileage || 12;
+    const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
+
+    document.getElementById('modalDriverName').textContent = `${driver ? driver.name : 'Vivek'} (Starting from ${driver?.homeLocation || 'Home'})`;
     
-    container.innerHTML = passengers.map(p => `
-        <div class="form-check custom-checkbox py-2 border-bottom">
-            <input class="form-check-input start-trip-pax fs-4" type="checkbox" value="${p.name}" id="startPax_${p.id}" checked>
-            <label class="form-check-label fs-5 ms-2 pt-1" for="startPax_${p.id}">
-                ${p.name}
-            </label>
-        </div>
-    `).join('');
-    
-    const modal = new bootstrap.Modal(document.getElementById('startTripModal'));
-    modal.show();
+    // Default route distance: e.g. 19 km or driver distance
+    const defaultRouteDist = settings.driverDistance || 17;
+    document.getElementById('modalRouteDistance').value = defaultRouteDist;
+
+    const tbody = document.getElementById('modalPassengerTableBody');
+    tbody.innerHTML = '';
+
+    passengers.forEach(p => {
+        const defaultPickupDist = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
+        const tr = document.createElement('tr');
+        tr.id = `modalPaxRow_${p.id}`;
+        tr.innerHTML = `
+            <td class="text-center">
+                <input class="form-check-input start-trip-pax fs-5" type="checkbox" value="${p.id}" id="startPax_${p.id}" checked>
+            </td>
+            <td>
+                <strong>${window.CarpoolApp.escapeHtml(p.name)}</strong>
+                <div class="text-muted small">${window.CarpoolApp.escapeHtml(p.pickupLocation || `${p.name} Pickup`)}</div>
+            </td>
+            <td style="width: 130px;">
+                <div class="input-group input-group-sm">
+                    <input type="number" class="form-control pax-dist-input fw-bold" data-pid="${p.id}" value="${defaultPickupDist}" step="0.1" min="0.1">
+                    <span class="input-group-text">km</span>
+                </div>
+            </td>
+            <td>
+                <span class="badge bg-light text-dark border pax-source-badge" id="sourceBadge_${p.id}">Manual</span>
+            </td>
+            <td>
+                <span class="pax-chargeable-dist fw-bold" id="chargeableDist_${p.id}">${defaultPickupDist} km</span>
+            </td>
+            <td>
+                <span class="text-muted small">₹${ratePerKm.toFixed(2)}/km</span>
+            </td>
+            <td>
+                <strong class="text-primary pax-amount-preview" id="amountPreview_${p.id}">₹${(defaultPickupDist * ratePerKm).toFixed(2)}</strong>
+            </td>
+        `;
+        tbody.appendChild(tr);
+
+        // Listeners for live recalculation
+        tr.querySelector('.pax-dist-input').addEventListener('input', updateModalFares);
+        tr.querySelector('.start-trip-pax').addEventListener('change', updateModalFares);
+    });
+
+    document.getElementById('modalTripType').addEventListener('change', updateModalFares);
+
+    function updateModalFares() {
+        const tripType = document.getElementById('modalTripType').value;
+        const multiplier = tripType === 'Full Day' ? 2 : 1;
+
+        passengers.forEach(p => {
+            const isChecked = document.getElementById(`startPax_${p.id}`).checked;
+            const distInput = document.querySelector(`.pax-dist-input[data-pid="${p.id}"]`);
+            const distVal = parseFloat(distInput.value) || 0;
+            const chargeable = distVal * multiplier;
+            const amt = chargeable * ratePerKm;
+
+            const chargeableEl = document.getElementById(`chargeableDist_${p.id}`);
+            const amountEl = document.getElementById(`amountPreview_${p.id}`);
+            const sourceEl = document.getElementById(`sourceBadge_${p.id}`);
+
+            if (chargeableEl) chargeableEl.textContent = `${chargeable.toFixed(1)} km`;
+            if (amountEl) amountEl.textContent = `₹${amt.toFixed(2)}`;
+            if (sourceEl) sourceEl.textContent = 'Manual';
+
+            const row = document.getElementById(`modalPaxRow_${p.id}`);
+            if (row) row.style.opacity = isChecked ? '1' : '0.4';
+        });
+    }
+
+    startTripModalInstance.show();
     
     document.getElementById('btnConfirmStartTrip').onclick = async () => {
         const selected = Array.from(document.querySelectorAll('.start-trip-pax:checked')).map(cb => cb.value);
         if (selected.length === 0) {
-            window.CarpoolApp.showToast('Please select at least one passenger', 'warning');
+            window.CarpoolApp.showToast('Please select at least one passenger.', 'warning');
             return;
         }
+
+        const routeDist = parseFloat(document.getElementById('modalRouteDistance').value) || 19;
+        const tripType = document.getElementById('modalTripType').value;
+
+        const passengerDetails = {};
+        selected.forEach((pid, idx) => {
+            const pObj = passengers.find(x => x.id === pid);
+            const distInput = document.querySelector(`.pax-dist-input[data-pid="${pid}"]`);
+            const manualDist = distInput ? parseFloat(distInput.value) : (pObj?.pickupDistance || 10);
+            const multiplier = tripType === 'Full Day' ? 2 : 1;
+            const finalDist = manualDist * multiplier;
+            const amount = parseFloat((finalDist * ratePerKm).toFixed(2));
+
+            passengerDetails[pid] = {
+                passengerId: pid,
+                passengerName: pObj ? pObj.name : pid,
+                pickupLocation: pObj?.pickupLocation || `${pObj?.name} Pickup`,
+                pickupOrder: idx + 1,
+                calculatedPickupDistance: pObj?.distance || 10,
+                manualPickupDistance: manualDist,
+                finalPickupDistance: finalDist,
+                distanceSource: 'manual',
+                chargeableDistance: finalDist,
+                ratePerKm: ratePerKm,
+                amount: amount
+            };
+        });
         
-        modal.hide();
-        await window.CarpoolTracker.startTrip(selected);
+        startTripModalInstance.hide();
+        await window.CarpoolTracker.startTrip(selected, {
+            actualRouteDistance: routeDist,
+            passengerDetails: passengerDetails,
+            tripType: tripType
+        });
         renderCurrentTripSection();
+        renderDebugPanel();
     };
 }
 
 function renderQuickTripEntry() {
-    const passengers = window.CarpoolApp.getPassengers().filter(p => p.active);
+    const passengers = window.CarpoolApp.getPassengers().filter(p => p.active !== false);
     const container = document.getElementById('quickTripPassengers');
+    const settings = window.CarpoolApp.getSettings();
+    const petrolPrice = settings.petrolPrice || 105;
+    const mileage = settings.mileage || 12;
+    const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
+
+    container.innerHTML = passengers.map(p => {
+        const pDist = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
+        return `
+            <input type="checkbox" class="btn-check quick-trip-pax" id="quickPax_${p.id}" value="${p.id}" checked>
+            <label class="btn btn-outline-primary rounded-pill px-3 py-2" for="quickPax_${p.id}">
+                <i class="bi bi-person-fill me-1"></i> ${window.CarpoolApp.escapeHtml(p.name)} <small class="badge bg-light text-dark ms-1">${pDist}km</small>
+            </label>
+        `;
+    }).join('');
+
+    function updateQuickPreview() {
+        const typeEl = document.querySelector('input[name="quickTripType"]:checked');
+        const type = typeEl ? typeEl.value : 'Office';
+        const distance = window.CarpoolApp.getDefaultDistance(type, settings.driverDistance || 17);
+        const fuelCost = window.CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
+
+        document.getElementById('quickTripDistPreview').textContent = `${distance} km`;
+        document.getElementById('quickTripCostPreview').textContent = window.CarpoolApp.formatCurrency(fuelCost);
+        document.getElementById('quickTripRatePreview').textContent = `₹${ratePerKm.toFixed(2)}/km`;
+    }
+
+    document.querySelectorAll('input[name="quickTripType"]').forEach(r => r.addEventListener('change', updateQuickPreview));
+    updateQuickPreview();
     
-    container.innerHTML = passengers.map(p => `
-        <input type="checkbox" class="btn-check quick-trip-pax" id="quickPax_${p.id}" value="${p.id}" checked>
-        <label class="btn btn-outline-secondary rounded-pill" for="quickPax_${p.id}">
-            <i class="bi bi-person"></i> ${p.name}
-        </label>
-    `).join('');
-    
-    document.getElementById('btnQuickSaveTrip').addEventListener('click', async () => {
+    document.getElementById('btnQuickSaveTrip').onclick = async () => {
         const btn = document.getElementById('btnQuickSaveTrip');
         btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...`;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Saving Trip...`;
 
         const typeEl = document.querySelector('input[name="quickTripType"]:checked');
         const type = typeEl ? typeEl.value : 'Office';
         
         const selectedPaxIds = Array.from(document.querySelectorAll('.quick-trip-pax:checked')).map(cb => cb.value);
         if (selectedPaxIds.length === 0) {
-            window.CarpoolApp.showToast('Select at least one passenger', 'warning');
+            window.CarpoolApp.showToast('Please select at least one passenger.', 'warning');
             btn.disabled = false;
-            btn.innerHTML = `<i class="bi bi-check2-circle"></i> Save Quick Trip`;
+            btn.innerHTML = `<i class="bi bi-check2-circle me-1"></i> Save Trip to History`;
             return;
         }
         
-        const settings = window.CarpoolApp.getSettings();
-        const distance = window.CarpoolApp.getDefaultDistance(type, settings.driverDistance || 10);
-        const fuelUsed = window.CarpoolApp.calculateFuelUsed(distance, settings.mileage);
-        const fuelCost = window.CarpoolApp.calculateFuelCost(distance, settings.mileage, settings.petrolPrice);
-        const paxShares = window.CarpoolApp.calculateShares(fuelCost, selectedPaxIds, settings.sharingMode, settings.customPercentages);
+        const distance = window.CarpoolApp.getDefaultDistance(type, settings.driverDistance || 17);
+        const fuelUsed = window.CarpoolApp.calculateFuelUsed(distance, mileage);
+        const fuelCost = window.CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
         
+        const multiplier = type === 'Full Day' ? 2 : 1;
+        const passengerDetails = {};
+        const passengerShares = {};
+
+        selectedPaxIds.forEach((pid, idx) => {
+            const pObj = passengers.find(x => x.id === pid);
+            const baseDist = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
+            const finalDist = baseDist * multiplier;
+            const amount = parseFloat((finalDist * ratePerKm).toFixed(2));
+
+            passengerDetails[pid] = {
+                passengerId: pid,
+                passengerName: pObj ? pObj.name : pid,
+                pickupLocation: pObj?.pickupLocation || `${pObj?.name} Pickup`,
+                pickupOrder: idx + 1,
+                calculatedPickupDistance: pObj?.distance || 10,
+                manualPickupDistance: baseDist,
+                finalPickupDistance: finalDist,
+                distanceSource: 'manual',
+                chargeableDistance: finalDist,
+                ratePerKm: ratePerKm,
+                amount: amount
+            };
+            passengerShares[pid] = amount;
+        });
+
         const tripData = {
             date: window.CarpoolApp.formatDateISO(new Date()),
             type: type,
+            driverId: settings.driverId || 'vivek',
+            driverName: settings.driverName || 'Vivek',
+            actualRouteDistance: distance,
             actualDistance: distance,
+            finalRouteDistance: distance,
+            distanceSource: 'manual',
             fuelUsed: fuelUsed,
             fuelCost: fuelCost,
+            ratePerKm: ratePerKm,
+            petrolPrice: petrolPrice,
+            mileage: mileage,
             passengers: selectedPaxIds,
-            passengerShares: paxShares,
-            status: 'completed'
+            passengerDetails: passengerDetails,
+            passengerShares: passengerShares,
+            sharingMode: settings.sharingMode || 'distance',
+            status: 'Completed',
+            notes: `Quick entry logged for ${type} trip.`
         };
         
         try {
             await window.CarpoolApp.saveTrip(tripData);
-            window.CarpoolApp.showToast('Trip logged successfully!', 'success');
-            await renderStatCards(); 
+            await renderStatCards();
+            renderDebugPanel();
             
-            // reset UI
+            // Reset selection
             document.getElementById('typeOffice').checked = true;
             document.querySelectorAll('.quick-trip-pax').forEach(cb => cb.checked = true);
+            updateQuickPreview();
         } catch (err) {
-            console.error("Error saving quick trip", err);
-            window.CarpoolApp.showToast('Failed to log trip', 'danger');
+            console.error("Error saving quick trip:", err);
         } finally {
             btn.disabled = false;
-            btn.innerHTML = `<i class="bi bi-check2-circle"></i> Save Quick Trip`;
+            btn.innerHTML = `<i class="bi bi-check2-circle me-1"></i> Save Trip to History`;
         }
-    });
+    };
 }
 
-// Initialize the dashboard page
-window.CarpoolApp.init('dashboard', initDashboard);
+function renderDebugPanel() {
+    const debugEl = document.getElementById('debugCalcContent');
+    if (!debugEl) return;
+
+    const settings = window.CarpoolApp.getSettings();
+    const driver = window.CarpoolApp.getDriver();
+    const passengers = window.CarpoolApp.getPassengers();
+    const petrolPrice = settings.petrolPrice || 105;
+    const mileage = settings.mileage || 12;
+    const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
+
+    let html = `
+DRIVER: ${driver ? driver.name : 'Vivek'} (Base: ${driver?.distance || 17} km, Starting: ${driver?.homeLocation || 'Home'})
+CAR: ${settings.carName || 'Tata Tiago'} | Mileage: ${mileage} km/l | Petrol Price: ₹${petrolPrice}/L
+RATE PER KM FORMULA: ₹${petrolPrice} / ${mileage} km/l = ₹${ratePerKm.toFixed(2)}/km
+ACTIVE SHARING MODE: ${settings.sharingMode || 'distance'} (Distance-based billing)
+
+EXAMPLE ROUTE BREAKDOWN:
+Vivek Home (0 km) → Jaydeep (9 km) → Madhura (12 km) → Office (19 km)
+Total Actual Car Route Distance = 19.0 km
+
+PASSENGER CHARGEABLE DISTANCES & CHARGES:
+`;
+
+    passengers.forEach((p, idx) => {
+        const pDist = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
+        const amt = (pDist * ratePerKm).toFixed(2);
+        html += `
+• [${p.name}] 
+  Pickup: ${p.pickupLocation || `${p.name} Landmark`} (Order: ${idx + 1})
+  Home-to-Office: ${p.distance || 0} km | Pickup Dist: ${pDist} km [Source: Manual Priority]
+  Chargeable Dist: ${pDist} km × ₹${ratePerKm.toFixed(2)}/km = ₹${amt}`;
+    });
+
+    debugEl.textContent = html;
+}

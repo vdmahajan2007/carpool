@@ -1,12 +1,15 @@
+// ============================================================
+// js/settings.js — Settings Logic
+// ============================================================
+
 let confirmModalInstance;
 let pendingClearAction = null;
 let allPeople = [];
-let initialPetrolPrice = 0;
 
 CarpoolApp.init('settings', async function() {
     confirmModalInstance = new bootstrap.Modal(document.getElementById('confirmModal'));
     
-    allPeople = await CarpoolApp.getPeople();
+    allPeople = CarpoolApp.getPeople();
     
     await loadSettings();
     
@@ -16,43 +19,70 @@ CarpoolApp.init('settings', async function() {
     
     document.getElementById('settingsForm').addEventListener('submit', handleSaveSettings);
     
+    document.getElementById('petrolPrice').addEventListener('input', updateRatePreview);
+    document.getElementById('mileage').addEventListener('input', updateRatePreview);
+
+    document.getElementById('btnBackupData').addEventListener('click', () => {
+        CarpoolApp.backupAll();
+    });
+
+    document.getElementById('restoreFileInput').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const data = await CarpoolApp.importJSON(file);
+            await CarpoolApp.restoreAll(data);
+        } catch (err) {
+            CarpoolApp.showToast('Failed to restore data: ' + err.message, 'danger');
+        }
+    });
+
     document.getElementById('btnClearTrips').addEventListener('click', () => {
-        showConfirmModal('Clear All Trips', 'Are you sure you want to delete ALL trips? This cannot be undone.', 'trips');
+        showConfirmModal('Clear All Trips', 'Are you sure you want to delete ALL trip records? This cannot be undone.', 'trips');
     });
     document.getElementById('btnClearPayments').addEventListener('click', () => {
-        showConfirmModal('Clear All Payments', 'Are you sure you want to delete ALL payments? This cannot be undone.', 'payments');
+        showConfirmModal('Clear All Payments', 'Are you sure you want to delete ALL payment records? This cannot be undone.', 'payments');
     });
     document.getElementById('confirmModalActionBtn').addEventListener('click', executeClearAction);
     
-    // Add event listeners to percentage inputs
     document.getElementById('customPercentageInputs').addEventListener('input', calculateTotalPercentage);
 });
 
 async function loadSettings() {
-    const settings = CarpoolApp.state.settings; // Since app.js state already has settings loaded
+    const settings = CarpoolApp.getSettings();
+    allPeople = CarpoolApp.getPeople();
     
-    if(settings) {
+    if (settings) {
         document.getElementById('carName').value = settings.carName || 'Tata Tiago';
         document.getElementById('fuelType').value = settings.fuelType || 'Petrol';
         document.getElementById('mileage').value = settings.mileage || '12';
-        
-        initialPetrolPrice = parseFloat(settings.petrolPrice || 105);
-        document.getElementById('petrolPrice').value = initialPetrolPrice;
+        document.getElementById('petrolPrice').value = settings.petrolPrice || 105;
+        document.getElementById('driverDistance').value = settings.driverDistance || 17;
         
         if (settings.petrolPriceUpdated) {
             document.getElementById('petrolPriceUpdated').textContent = CarpoolApp.formatDate(settings.petrolPriceUpdated);
         }
         
-        document.getElementById('driverName').value = settings.driverName || '';
+        document.getElementById('driverName').value = settings.driverName || 'Vivek';
         document.getElementById('tripExpiryHours').value = settings.tripExpiryHours || 4;
         
-        let mode = settings.sharingMode || 'equal';
+        let mode = (settings.sharingMode || 'distance').toLowerCase();
+        if (mode === 'distance-based' || mode === 'distance_based') mode = 'distance';
+        
         const modeInput = document.querySelector(`input[name="sharingMode"][value="${mode}"]`);
-        if(modeInput) modeInput.checked = true;
+        if (modeInput) modeInput.checked = true;
         
         renderCustomPercentageInputs(settings.customPercentages || {});
         toggleCustomPercentageSection();
+        updateRatePreview();
     }
+}
+
+function updateRatePreview() {
+    const price = parseFloat(document.getElementById('petrolPrice').value) || 105;
+    const mileage = parseFloat(document.getElementById('mileage').value) || 12;
+    const rate = CarpoolApp.calculateRatePerKm(price, mileage);
+    document.getElementById('settingsRatePreview').textContent = `₹${rate.toFixed(2)} / km (₹${price} ÷ ${mileage} km/l)`;
 }
 
 function renderCustomPercentageInputs(customPercentages) {
@@ -60,7 +90,7 @@ function renderCustomPercentageInputs(customPercentages) {
     container.innerHTML = '';
     
     allPeople.forEach(person => {
-        if (!person.active) return; // Only show active people
+        if (person.active === false) return;
         
         const col = document.createElement('div');
         col.className = 'col-6 col-md-4';
@@ -68,7 +98,7 @@ function renderCustomPercentageInputs(customPercentages) {
         const val = customPercentages[person.id] || 0;
         
         col.innerHTML = `
-            <label class="form-label mb-1">${CarpoolApp.escapeHtml(person.name)} ${person.role === 'driver' ? '(Driver)' : ''}</label>
+            <label class="form-label small mb-1 fw-bold">${CarpoolApp.escapeHtml(person.name)} ${person.role === 'Driver' ? '(Driver)' : ''}</label>
             <div class="input-group input-group-sm">
                 <input type="number" class="form-control pct-input" data-pid="${person.id}" value="${val}" min="0" max="100" step="0.1">
                 <span class="input-group-text">%</span>
@@ -81,10 +111,11 @@ function renderCustomPercentageInputs(customPercentages) {
 }
 
 function toggleCustomPercentageSection() {
-    const mode = document.querySelector('input[name="sharingMode"]:checked').value;
+    const checkedMode = document.querySelector('input[name="sharingMode"]:checked');
+    const mode = checkedMode ? checkedMode.value : 'distance';
     const container = document.getElementById('customPercentageContainer');
     
-    if (mode === 'custom_percentage') {
+    if (mode === 'custom_percentage' || mode === 'custom-percentage') {
         container.classList.remove('d-none');
     } else {
         container.classList.add('d-none');
@@ -115,10 +146,11 @@ async function handleSaveSettings(e) {
     e.preventDefault();
     
     const newPrice = parseFloat(document.getElementById('petrolPrice').value);
-    const mode = document.querySelector('input[name="sharingMode"]:checked').value;
+    const checkedMode = document.querySelector('input[name="sharingMode"]:checked');
+    const mode = checkedMode ? checkedMode.value : 'distance';
     
     let customPercentages = {};
-    if (mode === 'custom_percentage') {
+    if (mode === 'custom_percentage' || mode === 'custom-percentage') {
         const total = calculateTotalPercentage();
         if (Math.abs(total - 100) > 0.1) {
             CarpoolApp.showToast('Percentages must sum to exactly 100%', 'danger');
@@ -130,114 +162,75 @@ async function handleSaveSettings(e) {
         });
     }
     
-    // Find driver ID by name, or use existing driver ID
-    let driverId = CarpoolApp.state.settings.driverId;
-    const driverName = document.getElementById('driverName').value;
+    let driverId = CarpoolApp.getSettings()?.driverId || 'vivek';
+    const driverName = document.getElementById('driverName').value.trim();
     const driverObj = allPeople.find(p => p.name.toLowerCase() === driverName.toLowerCase());
     if (driverObj) {
         driverId = driverObj.id;
     }
     
     const settingsToSave = {
-        carName: document.getElementById('carName').value,
+        carName: document.getElementById('carName').value.trim(),
         fuelType: document.getElementById('fuelType').value,
         mileage: parseFloat(document.getElementById('mileage').value),
         petrolPrice: newPrice,
+        petrolPriceUpdated: CarpoolApp.formatDateISO(new Date()),
         driverName: driverName,
         driverId: driverId,
-        tripExpiryHours: parseInt(document.getElementById('tripExpiryHours').value),
+        driverDistance: parseFloat(document.getElementById('driverDistance').value) || 17,
+        tripExpiryHours: parseInt(document.getElementById('tripExpiryHours').value) || 4,
         sharingMode: mode,
         customPercentages: customPercentages
     };
     
-    // Update petrol price updated date if price changed
-    if (newPrice !== initialPetrolPrice || !CarpoolApp.state.settings.petrolPriceUpdated) {
-        settingsToSave.petrolPriceUpdated = new Date().toISOString();
-    } else {
-        settingsToSave.petrolPriceUpdated = CarpoolApp.state.settings.petrolPriceUpdated;
-    }
-
-    try {
-        const btn = document.getElementById('btnSaveSettings');
-        const origText = btn.innerHTML;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
-        btn.disabled = true;
-        
-        await CarpoolApp.saveSettings(settingsToSave);
-        
-        initialPetrolPrice = newPrice;
-        if (settingsToSave.petrolPriceUpdated) {
-            document.getElementById('petrolPriceUpdated').textContent = CarpoolApp.formatDate(settingsToSave.petrolPriceUpdated);
-        }
-        
-        CarpoolApp.showToast('Settings saved successfully!', 'success');
-        
-        setTimeout(() => {
-            btn.innerHTML = origText;
-            btn.disabled = false;
-        }, 500);
-    } catch(err) {
-        console.error("Error saving settings:", err);
-        CarpoolApp.showToast('Error saving settings', 'danger');
-        
-        const btn = document.getElementById('btnSaveSettings');
-        btn.innerHTML = '<i class="bi bi-save me-2"></i>Save Settings';
-        btn.disabled = false;
+    const btn = document.getElementById('btnSaveSettings');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving Settings...';
+    
+    const success = await CarpoolApp.saveSettings(settingsToSave);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-save me-2"></i>Save All Settings';
+    
+    if (success) {
+        document.getElementById('petrolPriceUpdated').textContent = CarpoolApp.formatDate(settingsToSave.petrolPriceUpdated);
     }
 }
 
-function showConfirmModal(title, message, collection) {
+function showConfirmModal(title, bodyText, action) {
     document.getElementById('confirmModalTitle').textContent = title;
-    document.getElementById('confirmModalBody').textContent = message;
-    pendingClearAction = collection;
+    document.getElementById('confirmModalBody').textContent = bodyText;
+    pendingClearAction = action;
     confirmModalInstance.show();
 }
 
 async function executeClearAction() {
     if (!pendingClearAction) return;
     
-    const btn = document.getElementById('confirmModalActionBtn');
-    const origText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Clearing...';
-    btn.disabled = true;
+    const actionBtn = document.getElementById('confirmModalActionBtn');
+    actionBtn.disabled = true;
+    actionBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Clearing...';
     
     try {
-        await clearCollection(pendingClearAction);
-        CarpoolApp.showToast(`Successfully cleared all ${pendingClearAction}!`, 'success');
-    } catch(err) {
-        console.error(`Error clearing ${pendingClearAction}:`, err);
-        CarpoolApp.showToast(`Error clearing ${pendingClearAction}: ` + err.message, 'danger');
-    }
-    
-    btn.innerHTML = origText;
-    btn.disabled = false;
-    confirmModalInstance.hide();
-    pendingClearAction = null;
-}
-
-async function clearCollection(collectionName) {
-    const snapshot = await CarpoolApp.db.collection(collectionName).get();
-    if (snapshot.size === 0) return;
-    
-    // Firestore allows max 500 operations per batch
-    const batches = [];
-    let batch = CarpoolApp.db.batch();
-    let operationCounter = 0;
-
-    snapshot.docs.forEach(doc => {
-        batch.delete(doc.ref);
-        operationCounter++;
-
-        if (operationCounter === 500) {
-            batches.push(batch.commit());
-            batch = CarpoolApp.db.batch();
-            operationCounter = 0;
+        if (pendingClearAction === 'trips') {
+            const snapshot = await CarpoolApp.db.collection('trips').get();
+            const batch = CarpoolApp.db.batch();
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            CarpoolApp.showToast('All trip records have been cleared.', 'success');
+        } else if (pendingClearAction === 'payments') {
+            const snapshot = await CarpoolApp.db.collection('payments').get();
+            const batch = CarpoolApp.db.batch();
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            CarpoolApp.showToast('All payment records have been cleared.', 'success');
         }
-    });
-
-    if (operationCounter > 0) {
-        batches.push(batch.commit());
+        confirmModalInstance.hide();
+    } catch (error) {
+        console.error('Clear action error:', error);
+        CarpoolApp.showToast('Failed to clear records: ' + error.message, 'danger');
+    } finally {
+        actionBtn.disabled = false;
+        actionBtn.innerHTML = 'Proceed';
+        pendingClearAction = null;
     }
-
-    await Promise.all(batches);
 }

@@ -1,19 +1,18 @@
+// ============================================================
+// js/calendar.js — Monthly Calendar View Logic
+// ============================================================
+
 CarpoolApp.init('calendar', async function() {
-    
     const currentMonthDisplay = document.getElementById('currentMonthDisplay');
     const calendarDays = document.getElementById('calendarDays');
     const prevMonthBtn = document.getElementById('prevMonthBtn');
     const nextMonthBtn = document.getElementById('nextMonthBtn');
     
-    let currentDate = new Date(); // Use actual current date as default
-    // Using system time to set context accurately if needed. Assuming user requested specific times contextually? Let's just use real current date, or a passed default.
-    // Setting up month/year tracking
+    let currentDate = new Date();
     let displayMonth = currentDate.getMonth();
     let displayYear = currentDate.getFullYear();
     
     let tripsMap = {};
-    let passengers = CarpoolApp.getPassengers();
-    const driver = CarpoolApp.getDriver();
     let dayModal;
 
     function init() {
@@ -40,10 +39,8 @@ CarpoolApp.init('calendar', async function() {
     async function renderCalendar() {
         currentMonthDisplay.textContent = `${CarpoolApp.MONTHS[displayMonth]} ${displayYear}`;
         
-        // Load trips for the month
-        const trips = await CarpoolApp.getTrips({month: displayMonth, year: displayYear});
+        const trips = await CarpoolApp.getTrips({ month: displayMonth, year: displayYear });
         
-        // Build map for quick lookup: date string (YYYY-MM-DD) -> trip object
         tripsMap = {};
         trips.forEach(trip => {
             tripsMap[trip.date] = trip;
@@ -51,20 +48,20 @@ CarpoolApp.init('calendar', async function() {
         
         calendarDays.innerHTML = '';
         
-        const firstDay = new Date(displayYear, displayMonth, 1).getDay(); // 0-6 (Sun-Sat)
+        const firstDay = new Date(displayYear, displayMonth, 1).getDay();
         const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
         
         const today = new Date();
         const todayStr = CarpoolApp.formatDateISO(today);
         
-        // Padding days
+        // Padding days before start of month
         for (let i = 0; i < firstDay; i++) {
             const emptyDiv = document.createElement('div');
             emptyDiv.className = 'calendar-day empty';
             calendarDays.appendChild(emptyDiv);
         }
         
-        // Days
+        // Days of month
         for (let day = 1; day <= daysInMonth; day++) {
             const dateObj = new Date(displayYear, displayMonth, day);
             const dateStr = CarpoolApp.formatDateISO(dateObj);
@@ -101,9 +98,8 @@ CarpoolApp.init('calendar', async function() {
         if (trip.status === 'WFH') return 'wfh';
         if (trip.status === 'Leave') return 'leave';
         if (trip.status === 'No Carpool') return 'nocarpool';
-        
         if (trip.type === 'Office' || trip.type === 'Return') return 'partial';
-        return 'trip'; // default completed
+        return 'trip';
     }
     
     function showDayDetails(dateStr, trip) {
@@ -111,30 +107,33 @@ CarpoolApp.init('calendar', async function() {
         
         const modalBody = document.getElementById('dayModalBody');
         const modalFooter = document.getElementById('dayModalFooter');
+        const passengers = CarpoolApp.getPassengers();
         
         if (!trip) {
             modalBody.innerHTML = `
                 <div class="text-center py-4">
-                    <i class="bi bi-calendar-x text-muted mb-2" style="font-size: 2rem;"></i>
+                    <i class="bi bi-calendar-x text-muted mb-2" style="font-size: 2.5rem;"></i>
                     <p class="mb-0 text-muted">No trip recorded for this day.</p>
                 </div>
             `;
             modalFooter.innerHTML = `
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <a href="trips.html" class="btn btn-primary">Add Trip</a>
+                <button type="button" class="btn btn-light rounded-pill px-3" data-bs-dismiss="modal">Close</button>
+                <a href="trips.html" class="btn btn-primary rounded-pill px-4">Log Trip</a>
             `;
         } else {
-            let passHtml = '<div class="text-muted small mb-1">No passengers</div>';
+            let passHtml = '<div class="text-muted small">No passengers in this trip.</div>';
             if (trip.passengers && trip.passengers.length > 0) {
                 passHtml = '<ul class="list-group list-group-flush mb-0">';
                 trip.passengers.forEach(pid => {
                     const p = passengers.find(x => x.id === pid);
-                    const name = p ? p.name : 'Unknown';
+                    const name = p ? p.name : (trip.passengerDetails?.[pid]?.passengerName || pid);
+                    const dist = trip.passengerDetails?.[pid]?.chargeableDistance || p?.pickupDistance || p?.distance || '';
+                    const distText = dist ? ` (${dist} km)` : '';
                     const share = (trip.passengerShares && trip.passengerShares[pid]) || 0;
                     passHtml += `
-                        <li class="list-group-item d-flex justify-content-between px-0 py-1 border-0 bg-transparent">
-                            <span>${CarpoolApp.escapeHtml(name)}</span>
-                            <strong>${CarpoolApp.formatCurrency(share)}</strong>
+                        <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-0 bg-transparent">
+                            <span><i class="bi bi-person-fill text-primary me-1"></i> <strong>${CarpoolApp.escapeHtml(name)}</strong><span class="text-muted small">${distText}</span></span>
+                            <strong class="text-primary">${CarpoolApp.formatCurrency(share)}</strong>
                         </li>
                     `;
                 });
@@ -142,39 +141,39 @@ CarpoolApp.init('calendar', async function() {
             }
 
             modalBody.innerHTML = `
-                <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold">Status:</span>
-                    <span class="badge ${getStatusBadge(trip.status)}">${CarpoolApp.escapeHtml(trip.status || 'Completed')}</span>
+                <div class="mb-2 d-flex justify-content-between align-items-center border-bottom pb-2">
+                    <span class="fw-bold text-muted small">Status:</span>
+                    <span class="badge ${getStatusBadge(trip.status)} rounded-pill px-3 py-1">${CarpoolApp.escapeHtml(trip.status || 'Completed')}</span>
                 </div>
-                <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold">Type:</span>
-                    <span>${CarpoolApp.escapeHtml(trip.type || 'N/A')}</span>
+                <div class="mb-2 d-flex justify-content-between align-items-center border-bottom pb-2">
+                    <span class="fw-bold text-muted small">Trip Type:</span>
+                    <span class="fw-bold">${CarpoolApp.escapeHtml(trip.type || 'N/A')}</span>
                 </div>
-                <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold">Distance:</span>
-                    <span>${trip.actualDistance || 0} km</span>
+                <div class="mb-2 d-flex justify-content-between align-items-center border-bottom pb-2">
+                    <span class="fw-bold text-muted small">Car Route Distance:</span>
+                    <span class="fw-bold">${trip.actualRouteDistance || trip.actualDistance || 0} km</span>
                 </div>
-                <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold">Fuel Used:</span>
+                <div class="mb-2 d-flex justify-content-between align-items-center border-bottom pb-2">
+                    <span class="fw-bold text-muted small">Fuel Used:</span>
                     <span>${(trip.fuelUsed || 0).toFixed(2)} L</span>
                 </div>
                 <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold text-primary">Total Fuel Cost:</span>
-                    <strong class="text-primary">${CarpoolApp.formatCurrency(trip.fuelCost || 0)}</strong>
+                    <span class="fw-bold text-muted small">Total Fuel Cost:</span>
+                    <strong class="text-primary fs-6">${CarpoolApp.formatCurrency(trip.fuelCost || 0)}</strong>
                 </div>
-                <div class="mt-4">
-                    <h6 class="fw-bold border-bottom pb-1 mb-2">Passengers & Shares</h6>
+                <div class="bg-light p-3 rounded-3 mb-2">
+                    <h6 class="fw-bold mb-2 small text-muted text-uppercase">Passengers & Individual Fares</h6>
                     ${passHtml}
                 </div>
                 ${trip.notes ? `
-                    <div class="mt-4 bg-light p-2 rounded small">
-                        <strong>Notes:</strong><br/>${CarpoolApp.escapeHtml(trip.notes)}
+                    <div class="bg-light p-2 rounded-3 small text-muted">
+                        <strong>Notes:</strong> ${CarpoolApp.escapeHtml(trip.notes)}
                     </div>
                 ` : ''}
             `;
             modalFooter.innerHTML = `
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <a href="trips.html" class="btn btn-outline-primary">Manage Trips</a>
+                <button type="button" class="btn btn-light rounded-pill px-3" data-bs-dismiss="modal">Close</button>
+                <a href="trips.html" class="btn btn-outline-primary rounded-pill px-3">Manage in Trips</a>
             `;
         }
         
@@ -185,7 +184,7 @@ CarpoolApp.init('calendar', async function() {
         switch(status) {
             case 'Completed': return 'bg-success';
             case 'Cancelled': return 'bg-danger';
-            case 'WFH': return 'bg-info text-dark';
+            case 'WFH': return 'bg-purple text-white';
             case 'Leave': return 'bg-warning text-dark';
             case 'No Carpool': return 'bg-secondary';
             default: return 'bg-secondary';

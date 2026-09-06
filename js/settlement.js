@@ -1,3 +1,7 @@
+// ============================================================
+// js/settlement.js — Monthly Settlement & Payments Logic
+// ============================================================
+
 CarpoolApp.init('settlement', async function() {
     let currentMonth = new Date().getMonth(); // 0-11
     let currentYear = new Date().getFullYear();
@@ -50,12 +54,12 @@ CarpoolApp.init('settlement', async function() {
         container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div></div>';
 
         try {
-            const passengers = await CarpoolApp.getPassengers();
-            const driver = await CarpoolApp.getDriver();
+            const passengers = CarpoolApp.getPassengers();
+            const driver = CarpoolApp.getDriver();
             const trips = await CarpoolApp.getTrips({ month: currentMonth, year: currentYear });
             
             if (passengers.length === 0) {
-                container.innerHTML = '<div class="alert alert-info">No passengers found. Please add people first.</div>';
+                container.innerHTML = '<div class="alert alert-info">No passengers found. Please add members in the People page first.</div>';
                 return;
             }
 
@@ -63,18 +67,32 @@ CarpoolApp.init('settlement', async function() {
             
             for (const person of passengers) {
                 // Filter trips where this passenger was present
-                const pTrips = trips.filter(t => t.passengers && t.passengers.includes(person.id));
+                const pTrips = trips.filter(t => t.passengers && (t.passengers.includes(person.id) || t.passengers.includes(person.name)));
                 
                 const travelDays = new Set(pTrips.map(t => t.date)).size;
-                const totalDistance = pTrips.reduce((sum, t) => sum + (t.actualDistance || 0), 0);
                 
-                // Calculate fuel share logic
-                const totalAmount = pTrips.reduce((sum, t) => sum + (t.passengerShares && t.passengerShares[person.id] ? t.passengerShares[person.id] : 0), 0);
+                // Calculate passenger's own cumulative chargeable distance
+                const totalPassengerDistance = pTrips.reduce((sum, t) => {
+                    if (t.passengerDetails && t.passengerDetails[person.id] && t.passengerDetails[person.id].chargeableDistance !== undefined) {
+                        return sum + parseFloat(t.passengerDetails[person.id].chargeableDistance);
+                    }
+                    const defaultDist = person.pickupDistance !== undefined ? person.pickupDistance : (person.distance || 10);
+                    const multiplier = t.type === 'Full Day' ? 2 : 1;
+                    return sum + (defaultDist * multiplier);
+                }, 0);
+                
+                // Sum passenger's individual fuel cost share
+                const totalAmount = pTrips.reduce((sum, t) => {
+                    if (t.passengerShares && t.passengerShares[person.id] !== undefined) {
+                        return sum + parseFloat(t.passengerShares[person.id]);
+                    }
+                    return sum;
+                }, 0);
                 
                 // Fetch payments
                 const payments = await CarpoolApp.getPayments({ personId: person.id, month: currentMonth, year: currentYear });
-                const paidAmount = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-                const pendingAmount = Math.max(0, totalAmount - paidAmount);
+                const paidAmount = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+                const pendingAmount = Math.max(0, parseFloat((totalAmount - paidAmount).toFixed(2)));
 
                 let statusBadge = '';
                 let statusClass = '';
@@ -110,109 +128,119 @@ CarpoolApp.init('settlement', async function() {
                     historyHtml = '<tr><td colspan="5" class="text-center text-muted small py-2">No payments recorded yet</td></tr>';
                 }
 
-                // Whatsapp message template
-                const driverName = driver ? driver.name : 'the driver';
-                const msg = `Hi ${person.name} 👋\n\n${CarpoolApp.MONTHS[currentMonth]} ${currentYear} carpool expense is ${CarpoolApp.formatCurrency(totalAmount)}.\n\nTravel days: ${travelDays}\nTotal distance: ${totalDistance.toFixed(1)} km\nFuel cost share: ${CarpoolApp.formatCurrency(totalAmount)}\nPaid: ${CarpoolApp.formatCurrency(paidAmount)}\n\nPlease transfer ${CarpoolApp.formatCurrency(pendingAmount)} to ${driverName}.\n\nThank you! 🚗`;
+                // WhatsApp message template with accurate message status
+                const driverName = driver ? driver.name : 'Vivek';
+                const msg = `Hi ${person.name} 👋\n\n${CarpoolApp.MONTHS[currentMonth]} ${currentYear} carpool expense is ${CarpoolApp.formatCurrency(totalAmount)}.\n\nTravel days: ${travelDays}\nTotal distance: ${totalPassengerDistance.toFixed(1)} km\nFuel cost share: ${CarpoolApp.formatCurrency(totalAmount)}\nPaid: ${CarpoolApp.formatCurrency(paidAmount)}\n\nPlease transfer ${CarpoolApp.formatCurrency(pendingAmount)} to ${driverName}.\n\nThank you! 🚗`;
                 const encodedMsg = encodeURIComponent(msg);
 
                 html += `
-                    <div class="card shadow-sm settlement-card">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
-                                <h5 class="card-title mb-0 fw-bold">${CarpoolApp.escapeHtml(person.name)}</h5>
-                                <span class="badge rounded-pill ${statusClass}">${statusBadge}</span>
-                            </div>
-                            
-                            <div class="row text-sm mb-3">
-                                <div class="col-6 mb-2">
-                                    <span class="text-muted d-block">Travel Days</span>
-                                    <strong>${travelDays}</strong>
+                    <div class="col-12 col-lg-6">
+                        <div class="card shadow-sm border-0 rounded-4 settlement-card h-100">
+                            <div class="card-body p-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                                    <h5 class="card-title mb-0 fw-bold">${CarpoolApp.escapeHtml(person.name)}</h5>
+                                    <span class="badge rounded-pill ${statusClass}">${statusBadge}</span>
                                 </div>
-                                <div class="col-6 mb-2">
-                                    <span class="text-muted d-block">Total Distance</span>
-                                    <strong>${totalDistance.toFixed(1)} km</strong>
-                                </div>
-                                <div class="col-6 mb-2">
-                                    <span class="text-muted d-block">Total Amount</span>
-                                    <strong>${CarpoolApp.formatCurrency(totalAmount)}</strong>
-                                </div>
-                                <div class="col-6 mb-2">
-                                    <span class="text-muted d-block">Pending Amount</span>
-                                    <strong class="text-danger">${CarpoolApp.formatCurrency(pendingAmount)}</strong>
-                                </div>
-                            </div>
-                            
-                            <div class="d-flex gap-2 flex-wrap mb-3 border-bottom pb-3">
-                                <button class="btn btn-sm btn-primary flex-grow-1 record-payment-btn" 
-                                    data-person-id="${person.id}" 
-                                    data-person-name="${CarpoolApp.escapeHtml(person.name)}" 
-                                    data-pending="${pendingAmount}">
-                                    <i class="bi bi-wallet2"></i> Record Payment
-                                </button>
-                                <button class="btn btn-sm btn-success px-3 send-whatsapp-btn" 
-                                    data-phone="${person.phone || ''}" 
-                                    data-msg="${encodedMsg}">
-                                    <i class="bi bi-whatsapp"></i>
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary px-3 copy-msg-btn" 
-                                    data-msg="${encodedMsg}">
-                                    <i class="bi bi-copy"></i>
-                                </button>
-                            </div>
-
-                            <div class="payment-history mt-2">
-                                <a class="text-decoration-none text-secondary small fw-bold d-block mb-2" data-bs-toggle="collapse" href="#history-${person.id}" role="button" aria-expanded="false">
-                                    <i class="bi bi-clock-history"></i> Payment History
-                                </a>
-                                <div class="collapse" id="history-${person.id}">
-                                    <div class="table-responsive">
-                                        <table class="table table-sm align-middle">
-                                            <thead>
-                                                <tr>
-                                                    <th>Date</th>
-                                                    <th>Amt</th>
-                                                    <th>Method</th>
-                                                    <th>Notes</th>
-                                                    <th></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                ${historyHtml}
-                                            </tbody>
-                                        </table>
+                                
+                                <div class="row g-2 text-sm mb-3">
+                                    <div class="col-6">
+                                        <div class="p-2 bg-light rounded-3">
+                                            <span class="text-muted d-block small">Travel Days</span>
+                                            <strong class="fs-6">${travelDays}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="p-2 bg-light rounded-3">
+                                            <span class="text-muted d-block small">Passenger Distance</span>
+                                            <strong class="fs-6">${totalPassengerDistance.toFixed(1)} km</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="p-2 bg-light rounded-3">
+                                            <span class="text-muted d-block small">Total Share</span>
+                                            <strong class="fs-6 text-primary">${CarpoolApp.formatCurrency(totalAmount)}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="p-2 bg-light rounded-3">
+                                            <span class="text-muted d-block small">Pending Due</span>
+                                            <strong class="fs-6 text-danger">${CarpoolApp.formatCurrency(pendingAmount)}</strong>
+                                        </div>
                                     </div>
                                 </div>
+                                
+                                <div class="d-flex gap-2 flex-wrap mb-3 border-bottom pb-3">
+                                    <button class="btn btn-sm btn-primary rounded-pill flex-grow-1 record-payment-btn" 
+                                        data-person-id="${person.id}" 
+                                        data-person-name="${CarpoolApp.escapeHtml(person.name)}" 
+                                        data-pending="${pendingAmount}">
+                                        <i class="bi bi-wallet2 me-1"></i> Record Payment
+                                    </button>
+                                    <button class="btn btn-sm btn-success rounded-pill px-3 send-whatsapp-btn" 
+                                        data-phone="${person.phone || ''}" 
+                                        data-msg="${encodedMsg}">
+                                        <i class="bi bi-whatsapp me-1"></i> Remind
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 copy-msg-btn" 
+                                        data-msg="${encodedMsg}">
+                                        <i class="bi bi-copy"></i>
+                                    </button>
+                                </div>
+
+                                <div class="payment-history mt-2">
+                                    <a class="text-decoration-none text-secondary small fw-bold d-block mb-2" data-bs-toggle="collapse" href="#history-${person.id}" role="button" aria-expanded="false">
+                                        <i class="bi bi-clock-history me-1"></i> Payment History (${payments.length})
+                                    </a>
+                                    <div class="collapse" id="history-${person.id}">
+                                        <div class="table-responsive">
+                                            <table class="table table-sm align-middle small mb-0">
+                                                <thead class="table-light">
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th>Amt</th>
+                                                        <th>Method</th>
+                                                        <th>Notes</th>
+                                                        <th></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${historyHtml}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
                     </div>
                 `;
             }
 
-            container.innerHTML = html;
+            container.innerHTML = `<div class="row g-4">${html}</div>`;
 
-            // Attach event listeners for dynamic buttons
+            // Attach event listeners
             container.querySelectorAll('.record-payment-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const btnEl = e.currentTarget;
-                    document.getElementById('payPersonId').value = btnEl.dataset.personId;
-                    document.getElementById('payPersonName').value = btnEl.dataset.personName;
-                    document.getElementById('payAmount').value = btnEl.dataset.pending > 0 ? btnEl.dataset.pending : '';
-                    document.getElementById('payDate').value = CarpoolApp.formatDateISO(new Date());
-                    document.getElementById('payMethod').value = 'UPI';
-                    document.getElementById('payNotes').value = '';
+                    const pid = e.currentTarget.dataset.personId;
+                    const name = e.currentTarget.dataset.personName;
+                    const pending = parseFloat(e.currentTarget.dataset.pending);
+                    
+                    document.getElementById('paymentPersonId').value = pid;
+                    document.getElementById('paymentPersonName').value = name;
+                    document.getElementById('paymentAmount').value = pending > 0 ? pending : '';
+                    document.getElementById('paymentDate').value = CarpoolApp.formatDateISO(new Date());
+                    document.getElementById('paymentNotes').value = '';
+                    document.getElementById('paymentMethod').value = 'UPI';
+                    
                     paymentModal.show();
                 });
             });
 
             container.querySelectorAll('.send-whatsapp-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    const btnEl = e.currentTarget;
-                    const phone = btnEl.dataset.phone;
-                    const msg = decodeURIComponent(btnEl.dataset.msg);
-                    if (!phone) {
-                        CarpoolApp.showToast('No phone number saved for this person.', 'warning');
-                        return;
-                    }
+                    const phone = e.currentTarget.dataset.phone;
+                    const msg = decodeURIComponent(e.currentTarget.dataset.msg);
                     CarpoolApp.openWhatsApp(phone, msg);
                 });
             });
@@ -233,7 +261,7 @@ CarpoolApp.init('settlement', async function() {
 
         } catch (error) {
             console.error('Error loading settlements:', error);
-            container.innerHTML = `<div class="alert alert-danger">Error loading settlements: ${error.message}</div>`;
+            container.innerHTML = `<div class="alert alert-danger">Error loading settlement data: ${error.message}</div>`;
         }
     }
 
@@ -244,17 +272,20 @@ CarpoolApp.init('settlement', async function() {
             return;
         }
 
-        const personId = document.getElementById('payPersonId').value;
-        const amount = parseFloat(document.getElementById('payAmount').value);
-        const date = document.getElementById('payDate').value;
-        const method = document.getElementById('payMethod').value;
-        const notes = document.getElementById('payNotes').value;
+        const btn = document.getElementById('savePaymentBtn');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+        btn.disabled = true;
 
         try {
-            const btn = document.getElementById('savePaymentBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
-            btn.disabled = true;
+            const personId = document.getElementById('paymentPersonId').value;
+            const amount = parseFloat(document.getElementById('paymentAmount').value);
+            const date = document.getElementById('paymentDate').value;
+            const method = document.getElementById('paymentMethod').value;
+            const notes = document.getElementById('paymentNotes').value.trim();
+
+            if (isNaN(amount) || amount <= 0) {
+                throw new Error("Please enter a valid payment amount.");
+            }
 
             await CarpoolApp.savePayment({
                 personId,
@@ -267,13 +298,12 @@ CarpoolApp.init('settlement', async function() {
             });
 
             paymentModal.hide();
-            CarpoolApp.showToast('Payment recorded successfully', 'success');
             await loadSettlements();
+
         } catch (error) {
             console.error('Error saving payment:', error);
-            CarpoolApp.showToast('Failed to record payment', 'danger');
+            CarpoolApp.showToast(error.message || 'Error recording payment.', 'danger');
         } finally {
-            const btn = document.getElementById('savePaymentBtn');
             btn.innerHTML = 'Save Payment';
             btn.disabled = false;
         }
@@ -281,23 +311,20 @@ CarpoolApp.init('settlement', async function() {
 
     async function confirmDeletePayment() {
         if (!paymentToDelete) return;
-        
-        try {
-            const btn = document.getElementById('confirmDeletePaymentBtn');
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Deleting...';
-            btn.disabled = true;
 
+        const btn = document.getElementById('confirmDeletePaymentBtn');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Deleting...';
+        btn.disabled = true;
+
+        try {
             await CarpoolApp.deletePayment(paymentToDelete);
-            
             deletePaymentModal.hide();
             paymentToDelete = null;
-            CarpoolApp.showToast('Payment deleted', 'success');
             await loadSettlements();
         } catch (error) {
             console.error('Error deleting payment:', error);
-            CarpoolApp.showToast('Failed to delete payment', 'danger');
+            CarpoolApp.showToast('Error deleting payment.', 'danger');
         } finally {
-            const btn = document.getElementById('confirmDeletePaymentBtn');
             btn.innerHTML = 'Delete';
             btn.disabled = false;
         }
@@ -305,44 +332,51 @@ CarpoolApp.init('settlement', async function() {
 
     async function exportSettlementData() {
         try {
-            const passengers = await CarpoolApp.getPassengers();
+            const passengers = CarpoolApp.getPassengers();
             const trips = await CarpoolApp.getTrips({ month: currentMonth, year: currentYear });
             
             const rows = [];
-            const headers = ['Name', 'Travel Days', 'Total Distance (km)', 'Total Amount', 'Paid Amount', 'Pending Amount', 'Status'];
-
             for (const person of passengers) {
-                const pTrips = trips.filter(t => t.passengers && t.passengers.includes(person.id));
+                const pTrips = trips.filter(t => t.passengers && (t.passengers.includes(person.id) || t.passengers.includes(person.name)));
                 const travelDays = new Set(pTrips.map(t => t.date)).size;
-                const totalDistance = pTrips.reduce((sum, t) => sum + (t.actualDistance || 0), 0);
-                const totalAmount = pTrips.reduce((sum, t) => sum + (t.passengerShares && t.passengerShares[person.id] ? t.passengerShares[person.id] : 0), 0);
                 
+                const totalPassengerDistance = pTrips.reduce((sum, t) => {
+                    if (t.passengerDetails && t.passengerDetails[person.id] && t.passengerDetails[person.id].chargeableDistance !== undefined) {
+                        return sum + parseFloat(t.passengerDetails[person.id].chargeableDistance);
+                    }
+                    const defaultDist = person.pickupDistance !== undefined ? person.pickupDistance : (person.distance || 10);
+                    const multiplier = t.type === 'Full Day' ? 2 : 1;
+                    return sum + (defaultDist * multiplier);
+                }, 0);
+
+                const totalAmount = pTrips.reduce((sum, t) => {
+                    if (t.passengerShares && t.passengerShares[person.id] !== undefined) {
+                        return sum + parseFloat(t.passengerShares[person.id]);
+                    }
+                    return sum;
+                }, 0);
+
                 const payments = await CarpoolApp.getPayments({ personId: person.id, month: currentMonth, year: currentYear });
                 const paidAmount = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
                 const pendingAmount = Math.max(0, totalAmount - paidAmount);
 
-                let status = 'Pending';
-                if (pendingAmount === 0 && totalAmount > 0) status = 'Paid';
-                else if (paidAmount > 0 && pendingAmount > 0) status = 'Partially Paid';
-                else if (totalAmount === 0) status = 'No Dues';
-
                 rows.push([
+                    CarpoolApp.MONTHS[currentMonth] + ' ' + currentYear,
                     person.name,
                     travelDays,
-                    totalDistance.toFixed(2),
+                    totalPassengerDistance.toFixed(1),
                     totalAmount.toFixed(2),
                     paidAmount.toFixed(2),
-                    pendingAmount.toFixed(2),
-                    status
+                    pendingAmount.toFixed(2)
                 ]);
             }
 
-            const monthName = CarpoolApp.MONTHS[currentMonth];
-            const filename = `Settlement_${monthName}_${currentYear}.csv`;
-            CarpoolApp.exportCSV(headers, rows, filename);
+            const headers = ['Month', 'Passenger', 'Travel Days', 'Passenger Distance (km)', 'Total Amount (₹)', 'Paid (₹)', 'Pending (₹)'];
+            CarpoolApp.exportCSV(headers, rows, `settlement-${currentYear}-${currentMonth + 1}.csv`);
+
         } catch (error) {
-            console.error('Error exporting data:', error);
-            CarpoolApp.showToast('Failed to export data', 'danger');
+            console.error('Error exporting settlement:', error);
+            CarpoolApp.showToast('Failed to export settlement data.', 'danger');
         }
     }
 });

@@ -12,18 +12,24 @@
     <style>
         .stat-card {
             background: #fff;
-            border-radius: 12px;
-            padding: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.05);
             height: 100%;
             display: flex;
             flex-direction: column;
             align-items: flex-start;
+            border: 1px solid rgba(0,0,0,0.03);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
         }
         .stat-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -31,21 +37,25 @@
             font-size: 20px;
             margin-bottom: 12px;
         }
-        .bg-blue { background-color: #0d6efd; }
-        .bg-teal { background-color: #20c997; }
-        .bg-orange { background-color: #fd7e14; }
-        .bg-green { background-color: #198754; }
-        .bg-purple { background-color: #6f42c1; }
-        .bg-pink { background-color: #d63384; }
+        .bg-blue { background-color: #4361ee; }
+        .bg-teal { background-color: #06d6a0; }
+        .bg-orange { background-color: #ff9f1c; }
+        .bg-green { background-color: #2ec4b6; }
+        .bg-purple { background-color: #7209b7; }
+        .bg-pink { background-color: #ef476f; }
+        .bg-cyan { background-color: #118ab2; }
+        
         .stat-label {
-            font-size: 14px;
+            font-size: 13px;
             color: #6c757d;
-            font-weight: 500;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .stat-value {
-            font-size: 20px;
+            font-size: 22px;
             font-weight: 700;
-            color: #212529;
+            color: #1a1a2e;
             margin: 4px 0;
         }
         .stat-sub {
@@ -53,19 +63,23 @@
             color: #adb5bd;
         }
         .btn-start-trip {
-            background-color: #dc3545;
+            background: linear-gradient(135deg, #4361ee, #3a0ca3);
             color: white;
             border: none;
-            padding: 16px;
-            border-radius: 12px;
+            padding: 18px 24px;
+            border-radius: 16px;
             width: 100%;
-            font-size: 18px;
-            font-weight: bold;
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
-            transition: all 0.2s;
+            font-size: 1.1rem;
+            font-weight: 700;
+            box-shadow: 0 4px 20px rgba(67, 97, 238, 0.35);
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .btn-start-trip:hover {
-            background-color: #bb2d3b;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(67, 97, 238, 0.45);
+            color: white;
         }
     </style>
 </head>
@@ -81,7 +95,7 @@
                     <!-- Cards injected via JS -->
                 </div>
 
-                <!-- Current Trip Section -->
+                <!-- Current / Live Trip Section -->
                 <div class="row mb-4">
                     <div class="col-12" id="currentTripSection">
                         <!-- Content injected via JS -->
@@ -89,33 +103,75 @@
                 </div>
 
                 <!-- Quick Trip Entry -->
-                <div class="row mb-4 pb-5">
+                <div class="row mb-4">
                     <div class="col-12">
                         <div class="card shadow-sm border-0 rounded-4">
-                            <div class="card-body">
-                                <h5 class="card-title mb-3"><i class="bi bi-journal-plus text-primary me-2"></i>Log Today's Trip</h5>
+                            <div class="card-body p-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="card-title mb-0 fw-bold"><i class="bi bi-journal-plus text-primary me-2"></i>Log Completed Trip</h5>
+                                    <span class="badge bg-light text-secondary border rounded-pill px-3 py-1">Quick Entry</span>
+                                </div>
+
                                 <div class="mb-3">
                                     <label class="form-label fw-bold text-muted small">TRIP TYPE</label>
                                     <div class="d-flex flex-wrap gap-2" id="quickTripTypes">
                                         <input type="radio" class="btn-check" name="quickTripType" id="typeOffice" value="Office" checked>
-                                        <label class="btn btn-outline-primary rounded-pill" for="typeOffice">Office</label>
+                                        <label class="btn btn-outline-primary rounded-pill px-3" for="typeOffice">Office (One Way)</label>
                                         <input type="radio" class="btn-check" name="quickTripType" id="typeReturn" value="Return">
-                                        <label class="btn btn-outline-primary rounded-pill" for="typeReturn">Return</label>
+                                        <label class="btn btn-outline-primary rounded-pill px-3" for="typeReturn">Return (One Way)</label>
                                         <input type="radio" class="btn-check" name="quickTripType" id="typeFullDay" value="Full Day">
-                                        <label class="btn btn-outline-primary rounded-pill" for="typeFullDay">Full Day</label>
+                                        <label class="btn btn-outline-primary rounded-pill px-3" for="typeFullDay">Full Day (Round)</label>
                                         <input type="radio" class="btn-check" name="quickTripType" id="typeCustom" value="Custom">
-                                        <label class="btn btn-outline-primary rounded-pill" for="typeCustom">Custom</label>
+                                        <label class="btn btn-outline-primary rounded-pill px-3" for="typeCustom">Custom</label>
                                     </div>
                                 </div>
-                                <div class="mb-4">
-                                    <label class="form-label fw-bold text-muted small">PASSENGERS</label>
+
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold text-muted small">PASSENGERS IN CAR</label>
                                     <div class="d-flex flex-wrap gap-2" id="quickTripPassengers">
                                         <!-- Checkboxes injected via JS -->
                                     </div>
                                 </div>
-                                <button class="btn btn-success w-100 rounded-pill fw-bold py-2" id="btnQuickSaveTrip">
-                                    <i class="bi bi-check2-circle"></i> Save Quick Trip
+
+                                <div class="bg-light rounded-3 p-3 mb-3">
+                                    <div class="row g-2 text-center">
+                                        <div class="col-4">
+                                            <div class="text-muted small">Distance</div>
+                                            <strong id="quickTripDistPreview" class="fs-6">0 km</strong>
+                                        </div>
+                                        <div class="col-4">
+                                            <div class="text-muted small">Fuel Cost</div>
+                                            <strong id="quickTripCostPreview" class="fs-6 text-primary">₹0.00</strong>
+                                        </div>
+                                        <div class="col-4">
+                                            <div class="text-muted small">Rate / km</div>
+                                            <strong id="quickTripRatePreview" class="fs-6 text-success">₹0.00</strong>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-success w-100 rounded-pill fw-bold py-2 shadow-sm" id="btnQuickSaveTrip">
+                                    <i class="bi bi-check2-circle me-1"></i> Save Trip to History
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calculation Debug & Verification Panel -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <div class="card border-0 rounded-4 shadow-sm bg-light">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-center cursor-pointer" data-bs-toggle="collapse" data-bs-target="#debugCalcPanel" style="cursor: pointer;">
+                                    <span class="fw-bold small text-muted"><i class="bi bi-calculator me-1"></i> Calculation & Distance Verification Panel</span>
+                                    <i class="bi bi-chevron-down text-muted"></i>
+                                </div>
+                                <div class="collapse mt-3" id="debugCalcPanel">
+                                    <div id="debugCalcContent" class="small text-muted font-monospace bg-white p-3 rounded-3 border">
+                                        Loading calculation details...
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -127,23 +183,103 @@
     <nav id="bottomnav" class="bottom-nav"></nav>
     <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1090;"></div>
     
-    <!-- Start Trip Modal -->
+    <!-- Start Trip & Route Preview Modal -->
     <div class="modal fade" id="startTripModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content border-0 rounded-4 shadow">
-                <div class="modal-header border-bottom-0 pb-0">
-                    <h5 class="modal-title fw-bold"><i class="bi bi-broadcast text-danger me-2"></i>Start Live Trip</h5>
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-broadcast text-danger me-2"></i>Trip Summary & Live GPS Setup</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-muted mb-3">Select passengers traveling with you:</p>
-                    <div id="startTripPassengers" class="d-flex flex-column gap-2">
-                        <!-- Checkboxes injected via JS -->
+                    
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-muted">DRIVER</label>
+                            <div class="p-2 bg-light rounded-3 fw-bold d-flex align-items-center">
+                                <i class="bi bi-steering-wheel text-primary me-2"></i>
+                                <span id="modalDriverName">Vivek</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-muted">TRIP TYPE</label>
+                            <select id="modalTripType" class="form-select form-select-sm rounded-pill">
+                                <option value="Office" selected>Office (Morning One Way)</option>
+                                <option value="Return">Return (Evening One Way)</option>
+                                <option value="Full Day">Full Day (Round Trip)</option>
+                                <option value="Custom">Custom Route</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Total Route Distance -->
+                    <div class="card border-0 bg-primary bg-opacity-10 rounded-3 p-3 mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="fw-bold text-primary"><i class="bi bi-signpost-split me-1"></i> Total Actual Car Route Distance</span>
+                                <div class="text-muted small">Car route distance (e.g. Vivek Home → Jaydeep → Madhura → Office)</div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2" style="width: 140px;">
+                                <input type="number" id="modalRouteDistance" class="form-control fw-bold text-end" value="19" step="0.1" min="0.1">
+                                <span class="fw-bold text-primary">km</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h6 class="fw-bold mb-2 text-muted small text-uppercase">Passenger Specific Distances & Fare Breakdown</h6>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead class="table-light small">
+                                <tr>
+                                    <th style="width: 40px;">Include</th>
+                                    <th>Passenger</th>
+                                    <th>Pickup Distance (km)</th>
+                                    <th>Source</th>
+                                    <th>Chargeable (km)</th>
+                                    <th>Rate</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalPassengerTableBody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="alert alert-info py-2 px-3 small mb-0 rounded-3">
+                        <i class="bi bi-info-circle me-1"></i> <strong>Note:</strong> Starting live tracking creates a real GPS broadcast link that your passengers can track in real-time.
+                    </div>
+
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger rounded-pill px-4 fw-bold" id="btnConfirmStartTrip">
+                        <i class="bi bi-geo-alt-fill me-1"></i> Start Live Trip
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- End Trip Confirmation Modal -->
+    <div class="modal fade" id="endTripModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 rounded-4 shadow">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold text-danger"><i class="bi bi-stop-circle me-2"></i>End Live Trip</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Are you sure you want to stop live location sharing and save this trip to history?</p>
+                    <div class="bg-light rounded-3 p-3 small text-muted">
+                        <div><i class="bi bi-check2 text-success me-1"></i> GPS tracking will immediately stop.</div>
+                        <div><i class="bi bi-check2 text-success me-1"></i> Trip distance and passenger charges will be finalized.</div>
+                        <div><i class="bi bi-check2 text-success me-1"></i> Public live tracking page will complete.</div>
                     </div>
                 </div>
-                <div class="modal-footer border-top-0 pt-0">
-                    <button type="button" class="btn btn-light rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-danger rounded-pill px-4 fw-bold" id="btnConfirmStartTrip">Start Tracking</button>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-light rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger rounded-pill px-4 fw-bold" id="btnConfirmEndTrip">Yes, End Trip</button>
                 </div>
             </div>
         </div>

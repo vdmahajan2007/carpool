@@ -1,3 +1,7 @@
+// ============================================================
+// js/reports.js — Reports & Data Analytics Logic
+// ============================================================
+
 let charts = {};
 let currentYearData = [];
 let passengers = [];
@@ -28,16 +32,15 @@ CarpoolApp.init('reports', async function() {
 
     restoreInput.addEventListener('change', async (e) => {
         if (e.target.files.length > 0) {
-            if (confirm('Are you sure you want to restore data? This will OVERWRITE all existing data.')) {
+            if (confirm('Are you sure you want to restore data? This will OVERWRITE existing data.')) {
                 try {
-                    await CarpoolApp.restoreAll(e.target.files[0]);
-                    CarpoolApp.showToast('Data restored successfully! Reloading...', 'success');
-                    setTimeout(() => location.reload(), 1500);
+                    const data = await CarpoolApp.importJSON(e.target.files[0]);
+                    await CarpoolApp.restoreAll(data);
                 } catch(err) {
                     CarpoolApp.showToast('Restore failed: ' + err.message, 'danger');
                 }
             }
-            e.target.value = ''; // reset
+            e.target.value = '';
         }
     });
 });
@@ -56,9 +59,8 @@ function initYearSelector() {
 
 async function loadDataForYear(year) {
     try {
-        passengers = await CarpoolApp.getPassengers();
+        passengers = CarpoolApp.getPassengers();
         
-        // Fetch trips for the selected year
         const startDate = `${year}-01-01`;
         const endDate = `${year + 1}-01-01`;
         
@@ -69,22 +71,21 @@ async function loadDataForYear(year) {
             .get();
             
         currentYearData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
         updateDashboard();
     } catch(err) {
         console.error("Error loading year data:", err);
-        CarpoolApp.showToast('Error loading data', 'danger');
+        CarpoolApp.showToast('Error loading reports data.', 'danger');
     }
 }
 
 function updateDashboard() {
     // 1. Process data by month
-    const monthlyData = Array.from({length: 12}, () => ({
+    const monthlyData = Array.from({ length: 12 }, () => ({
         trips: 0,
         distance: 0,
         fuelUsed: 0,
         fuelCost: 0,
-        passengerShares: {} // pid -> total share
+        passengerShares: {}
     }));
     
     passengers.forEach(p => {
@@ -96,30 +97,35 @@ function updateDashboard() {
     let totalFuelCost = 0;
     let totalContributions = 0;
     
-    const passengerTotals = {}; // pid -> total share overall
+    const passengerTotals = {};
     passengers.forEach(p => passengerTotals[p.id] = 0);
 
     currentYearData.forEach(trip => {
-        if (trip.status === 'cancelled') return;
+        if (trip.status === 'Cancelled' || trip.status === 'cancelled') return;
         
-        const monthIndex = new Date(trip.date).getMonth(); // 0-11
+        const monthIndex = new Date(trip.date).getMonth();
         const md = monthlyData[monthIndex];
         
+        const dist = parseFloat(trip.actualRouteDistance || trip.actualDistance || 0);
+        const fuel = parseFloat(trip.fuelUsed || 0);
+        const cost = parseFloat(trip.fuelCost || 0);
+
         md.trips++;
-        md.distance += (trip.actualDistance || 0);
-        md.fuelUsed += (trip.fuelUsed || 0);
-        md.fuelCost += (trip.fuelCost || 0);
+        md.distance += dist;
+        md.fuelUsed += fuel;
+        md.fuelCost += cost;
         
         totalTrips++;
-        totalDistance += (trip.actualDistance || 0);
-        totalFuelCost += (trip.fuelCost || 0);
+        totalDistance += dist;
+        totalFuelCost += cost;
         
         if (trip.passengerShares) {
             for (const [pid, amount] of Object.entries(trip.passengerShares)) {
+                const amt = parseFloat(amount || 0);
                 if (md.passengerShares[pid] !== undefined) {
-                    md.passengerShares[pid] += amount;
-                    passengerTotals[pid] += amount;
-                    totalContributions += amount;
+                    md.passengerShares[pid] += amt;
+                    passengerTotals[pid] += amt;
+                    totalContributions += amt;
                 }
             }
         }
@@ -145,8 +151,10 @@ function renderCharts(monthlyData, passengerTotals) {
     const fuelCostData = monthlyData.map(m => m.fuelCost);
     const tripsData = monthlyData.map(m => m.trips);
     
-    // Destroy existing charts if any
-    Object.values(charts).forEach(c => c.destroy());
+    // Destroy existing charts
+    Object.values(charts).forEach(c => {
+        if (c && typeof c.destroy === 'function') c.destroy();
+    });
     
     const commonOptions = {
         responsive: true,
@@ -159,9 +167,10 @@ function renderCharts(monthlyData, passengerTotals) {
         data: {
             labels: months,
             datasets: [{
-                label: 'Distance (km)',
+                label: 'Car Distance (km)',
                 data: distanceData,
-                backgroundColor: '#4361ee'
+                backgroundColor: '#4361ee',
+                borderRadius: 6
             }]
         },
         options: commonOptions
@@ -175,7 +184,8 @@ function renderCharts(monthlyData, passengerTotals) {
             datasets: [{
                 label: 'Fuel Cost (₹)',
                 data: fuelCostData,
-                backgroundColor: '#06d6a0'
+                backgroundColor: '#06d6a0',
+                borderRadius: 6
             }]
         },
         options: commonOptions
@@ -194,10 +204,10 @@ function renderCharts(monthlyData, passengerTotals) {
     charts.contributions = new Chart(document.getElementById('passengerContributionsChart'), {
         type: 'doughnut',
         data: {
-            labels: pNames,
+            labels: pNames.length > 0 ? pNames : ['No Data'],
             datasets: [{
-                data: pData,
-                backgroundColor: ['#4361ee', '#7209b7', '#ef476f', '#ff9f1c', '#06d6a0', '#118ab2', '#073b4c']
+                data: pData.length > 0 ? pData : [1],
+                backgroundColor: ['#4361ee', '#7209b7', '#ef476f', '#ff9f1c', '#06d6a0', '#118ab2', '#e9ecef']
             }]
         },
         options: {
@@ -207,12 +217,8 @@ function renderCharts(monthlyData, passengerTotals) {
                     callbacks: {
                         label: function(context) {
                             let label = context.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed !== null) {
-                                label += CarpoolApp.formatCurrency(context.parsed);
-                            }
+                            if (label) label += ': ';
+                            if (context.parsed !== null) label += CarpoolApp.formatCurrency(context.parsed);
                             return label;
                         }
                     }
@@ -227,11 +233,12 @@ function renderCharts(monthlyData, passengerTotals) {
         data: {
             labels: months,
             datasets: [{
-                label: 'Trips',
+                label: 'Completed Trips',
                 data: tripsData,
                 borderColor: '#118ab2',
-                tension: 0.1,
-                fill: false
+                backgroundColor: 'rgba(17, 138, 178, 0.1)',
+                tension: 0.2,
+                fill: true
             }]
         },
         options: {
@@ -245,12 +252,10 @@ function renderCharts(monthlyData, passengerTotals) {
 
 function renderTable(monthlyData) {
     const headerRow = document.getElementById('tableHeaderRow');
-    // Clear extra headers
     while (headerRow.children.length > 5) {
         headerRow.removeChild(headerRow.lastChild);
     }
     
-    // Add passenger headers
     passengers.forEach(p => {
         const th = document.createElement('th');
         th.textContent = p.name;
@@ -271,11 +276,11 @@ function renderTable(monthlyData) {
         
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${CarpoolApp.getMonthName(idx)}</td>
+            <td class="fw-semibold">${CarpoolApp.getMonthName(idx)}</td>
             <td>${m.trips}</td>
-            <td>${m.distance.toFixed(1)}</td>
-            <td>${m.fuelUsed.toFixed(2)}</td>
-            <td>${CarpoolApp.formatCurrency(m.fuelCost)}</td>
+            <td>${m.distance.toFixed(1)} km</td>
+            <td>${m.fuelUsed.toFixed(2)} L</td>
+            <td class="text-primary fw-bold">${CarpoolApp.formatCurrency(m.fuelCost)}</td>
         `;
         
         passengers.forEach(p => {
@@ -289,39 +294,42 @@ function renderTable(monthlyData) {
         tbody.appendChild(tr);
     });
     
-    // Footer
     const tfoot = document.getElementById('tableFoot');
     tfoot.innerHTML = `
-        <tr>
-            <td><strong>Total</strong></td>
+        <tr class="table-light fw-bold">
+            <td>Total</td>
             <td>${sums.trips}</td>
-            <td>${sums.dist.toFixed(1)}</td>
-            <td>${sums.fuel.toFixed(2)}</td>
-            <td>${CarpoolApp.formatCurrency(sums.cost)}</td>
-            ${passengers.map(p => `<td>${CarpoolApp.formatCurrency(sums.pass[p.id])}</td>`).join('')}
+            <td>${sums.dist.toFixed(1)} km</td>
+            <td>${sums.fuel.toFixed(2)} L</td>
+            <td class="text-primary">${CarpoolApp.formatCurrency(sums.cost)}</td>
+            ${passengers.map(p => `<td class="text-primary">${CarpoolApp.formatCurrency(sums.pass[p.id])}</td>`).join('')}
         </tr>
     `;
 }
 
 function exportTripsCSV() {
-    const headers = ['Date', 'Type', 'Passengers', 'Distance (km)', 'Fuel Used (L)', 'Fuel Cost (₹)', 'Status', 'Notes'];
+    const headers = ['Date', 'Type', 'Driver', 'Passengers', 'Car Route Distance (km)', 'Fuel Used (L)', 'Fuel Cost (₹)', 'Rate Per KM (₹)', 'Status', 'Notes'];
     const rows = currentYearData.map(trip => {
         let passNames = '';
         if (trip.passengers && trip.passengers.length > 0) {
             passNames = trip.passengers.map(pid => {
                 const p = passengers.find(x => x.id === pid);
-                return p ? p.name : 'Unknown';
-            }).join(', ');
+                const pName = p ? p.name : pid;
+                const pDist = trip.passengerDetails?.[pid]?.chargeableDistance || p?.pickupDistance || '';
+                return pDist ? `${pName} (${pDist}km)` : pName;
+            }).join('; ');
         }
         
         return [
             trip.date,
-            trip.type || 'Unknown',
+            trip.type || 'Office',
+            trip.driverName || 'Vivek',
             passNames,
-            trip.actualDistance || 0,
+            trip.actualRouteDistance || trip.actualDistance || 0,
             trip.fuelUsed || 0,
             trip.fuelCost || 0,
-            trip.status || '',
+            trip.ratePerKm || '',
+            trip.status || 'Completed',
             trip.notes || ''
         ];
     });
@@ -331,27 +339,23 @@ function exportTripsCSV() {
 
 async function exportSettlementsCSV() {
     const year = document.getElementById('yearSelector').value;
-    const headers = ['Month', 'Passenger', 'Travel Days', 'Distance (km)', 'Amount (₹)', 'Paid (₹)', 'Pending (₹)'];
+    const headers = ['Month', 'Passenger', 'Travel Days', 'Passenger Distance (km)', 'Fuel Share (₹)', 'Paid Amount (₹)', 'Pending Due (₹)'];
     const rows = [];
     
     try {
         for (let m = 0; m < 12; m++) {
-            const monthStr = `${year}-${String(m + 1).padStart(2, '0')}`;
             const monthName = CarpoolApp.getMonthName(m);
             
-            // Re-aggregate per passenger for this month
             for (const p of passengers) {
-                // Get payments for this person, month
-                const payments = await CarpoolApp.getPayments({ personId: p.id, month: m+1, year: parseInt(year) });
+                const payments = await CarpoolApp.getPayments({ personId: p.id, month: m, year: parseInt(year) });
                 let totalPaid = 0;
-                payments.forEach(pay => totalPaid += pay.amount);
+                payments.forEach(pay => totalPaid += parseFloat(pay.amount || 0));
                 
-                // Get trips where this person was a passenger in this month
                 const tripsInMonth = currentYearData.filter(t => 
                     new Date(t.date).getMonth() === m && 
                     t.passengers && 
-                    t.passengers.includes(p.id) &&
-                    t.status !== 'cancelled'
+                    (t.passengers.includes(p.id) || t.passengers.includes(p.name)) &&
+                    t.status !== 'Cancelled' && t.status !== 'cancelled'
                 );
                 
                 let travelDays = tripsInMonth.length;
@@ -359,21 +363,25 @@ async function exportSettlementsCSV() {
                 let totalAmount = 0;
                 
                 tripsInMonth.forEach(t => {
-                    totalDist += (t.actualDistance || 0);
+                    const pDist = t.passengerDetails?.[p.id]?.chargeableDistance !== undefined 
+                        ? parseFloat(t.passengerDetails[p.id].chargeableDistance)
+                        : (p.pickupDistance || p.distance || 10) * (t.type === 'Full Day' ? 2 : 1);
+                    totalDist += pDist;
+
                     if (t.passengerShares && t.passengerShares[p.id]) {
-                        totalAmount += t.passengerShares[p.id];
+                        totalAmount += parseFloat(t.passengerShares[p.id]);
                     }
                 });
                 
                 if (travelDays > 0 || totalPaid > 0) {
                     rows.push([
-                        monthName,
+                        monthName + ' ' + year,
                         p.name,
                         travelDays,
                         totalDist.toFixed(1),
                         totalAmount.toFixed(2),
                         totalPaid.toFixed(2),
-                        (totalAmount - totalPaid).toFixed(2)
+                        Math.max(0, totalAmount - totalPaid).toFixed(2)
                     ]);
                 }
             }
@@ -382,6 +390,6 @@ async function exportSettlementsCSV() {
         CarpoolApp.exportCSV(headers, rows, `Carpool_Settlements_${year}.csv`);
     } catch(err) {
         console.error("Export Settlements Error:", err);
-        CarpoolApp.showToast("Error generating settlement report", 'danger');
+        CarpoolApp.showToast("Error generating settlement report.", 'danger');
     }
 }
