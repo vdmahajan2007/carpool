@@ -15,7 +15,6 @@ CarpoolApp.init('dashboard', async function() {
     await renderStatCards();
     renderCurrentTripSection();
     renderQuickTripEntry();
-    renderDebugPanel();
 
     // Auto-refresh stats and live tracking state periodically
     setInterval(() => {
@@ -70,7 +69,7 @@ async function renderStatCards() {
     });
 
     let statCardsHtml = `
-        <div class="col-6 col-md-4 col-lg-2">
+        <div class="col-6 col-md-4 col-lg">
             <div class="stat-card">
                 <div class="stat-icon bg-blue"><i class="bi bi-car-front-fill"></i></div>
                 <div class="stat-label">Total Trips</div>
@@ -78,7 +77,7 @@ async function renderStatCards() {
                 <div class="stat-sub">This month</div>
             </div>
         </div>
-        <div class="col-6 col-md-4 col-lg-2">
+        <div class="col-6 col-md-4 col-lg">
             <div class="stat-card">
                 <div class="stat-icon bg-teal"><i class="bi bi-speedometer2"></i></div>
                 <div class="stat-label">Actual Distance</div>
@@ -86,7 +85,7 @@ async function renderStatCards() {
                 <div class="stat-sub">Car route</div>
             </div>
         </div>
-        <div class="col-6 col-md-4 col-lg-2">
+        <div class="col-6 col-md-4 col-lg">
             <div class="stat-card">
                 <div class="stat-icon bg-orange"><i class="bi bi-fuel-pump-fill"></i></div>
                 <div class="stat-label">Total Trip Cost</div>
@@ -94,7 +93,7 @@ async function renderStatCards() {
                 <div class="stat-sub">@ ₹${settings.petrolPrice || 105}/L</div>
             </div>
         </div>
-        <div class="col-6 col-md-4 col-lg-2">
+        <div class="col-6 col-md-4 col-lg">
             <div class="stat-card">
                 <div class="stat-icon bg-primary text-white"><i class="bi bi-wallet2"></i></div>
                 <div class="stat-label">Your Contribution</div>
@@ -102,20 +101,12 @@ async function renderStatCards() {
                 <div class="stat-sub">Driver's share</div>
             </div>
         </div>
-        <div class="col-6 col-md-4 col-lg-2">
+        <div class="col-6 col-md-4 col-lg">
             <div class="stat-card">
                 <div class="stat-icon bg-green"><i class="bi bi-people-fill"></i></div>
                 <div class="stat-label">Friends' Contribution</div>
                 <div class="stat-value text-success">${window.CarpoolApp.formatCurrencyShort(friendsTotalContribution)}</div>
                 <div class="stat-sub">Passengers' share</div>
-            </div>
-        </div>
-        <div class="col-6 col-md-4 col-lg-2">
-            <div class="stat-card">
-                <div class="stat-icon bg-secondary text-white"><i class="bi bi-shield-check"></i></div>
-                <div class="stat-label">Driver Profit</div>
-                <div class="stat-value text-muted">₹0</div>
-                <div class="stat-sub">Zero markup</div>
             </div>
         </div>
     `;
@@ -265,11 +256,12 @@ function updateLiveTripUI() {
                 const pObj = allPeople.find(x => x.name.toLowerCase() === pName.toLowerCase() || x.id === pName);
                 const phone = pObj ? pObj.phone : '';
                 const msg = window.CarpoolTracker.generateShareMessage(tripId, pName);
+                const encodedMsg = encodeURIComponent(msg);
 
                 buttonsHtml += `
                     <div class="col-12 col-sm-6">
-                        <button class="btn btn-whatsapp w-100 rounded-pill py-2 shadow-sm text-start d-flex align-items-center justify-content-between" 
-                            onclick="window.CarpoolApp.openWhatsApp('${phone}', '${msg}')">
+                        <button class="btn btn-whatsapp w-100 rounded-pill py-2 shadow-sm text-start d-flex align-items-center justify-content-between share-whatsapp-btn" 
+                            data-phone="${phone}" data-msg="${encodedMsg}">
                             <span><i class="bi bi-whatsapp me-2"></i> Share with <strong>${window.CarpoolApp.escapeHtml(pName)}</strong></span>
                             <span class="badge bg-white text-success rounded-pill px-2 py-1 small">WhatsApp</span>
                         </button>
@@ -277,19 +269,42 @@ function updateLiveTripUI() {
                 `;
             });
 
+            const genMsg = encodeURIComponent(window.CarpoolTracker.generateShareMessage(tripId, 'Passenger'));
             buttonsHtml += `
                 <div class="col-6">
-                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small" onclick="window.CarpoolApp.copyToClipboard('${window.CarpoolTracker.generateShareMessage(tripId, 'Passenger')}')">
+                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small copy-share-msg-btn" data-msg="${genMsg}">
                         <i class="bi bi-clipboard me-1"></i> Copy Message
                     </button>
                 </div>
                 <div class="col-6">
-                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small" onclick="window.CarpoolApp.copyToClipboard('${link}')">
+                    <button class="btn btn-outline-secondary w-100 rounded-pill py-2 small copy-share-link-btn" data-link="${encodeURIComponent(link)}">
                         <i class="bi bi-link-45deg me-1"></i> Copy Link
                     </button>
                 </div>
             `;
             shareContainer.innerHTML = buttonsHtml;
+
+            shareContainer.querySelectorAll('.share-whatsapp-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const phone = e.currentTarget.dataset.phone;
+                    const msg = decodeURIComponent(e.currentTarget.dataset.msg || '');
+                    window.CarpoolApp.openWhatsApp(phone, msg);
+                });
+            });
+
+            shareContainer.querySelectorAll('.copy-share-msg-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const msg = decodeURIComponent(e.currentTarget.dataset.msg || '');
+                    window.CarpoolApp.copyToClipboard(msg);
+                });
+            });
+
+            shareContainer.querySelectorAll('.copy-share-link-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const link = decodeURIComponent(e.currentTarget.dataset.link || '');
+                    window.CarpoolApp.copyToClipboard(link);
+                });
+            });
         }
 
         // Leaflet Map Rendering
@@ -611,73 +626,4 @@ function renderQuickTripEntry() {
             btn.innerHTML = `<i class="bi bi-check2-circle me-1"></i> Save Trip to History`;
         }
     };
-}
-
-function renderDebugPanel() {
-    const debugEl = document.getElementById('debugCalcContent');
-    if (!debugEl) return;
-
-    const settings = window.CarpoolApp.getSettings();
-    const driver = window.CarpoolApp.getDriver();
-    const passengers = window.CarpoolApp.getPassengers();
-    const petrolPrice = settings.petrolPrice || 105;
-    const mileage = settings.mileage || 12;
-    const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
-
-    const sampleTripDistance = 18;
-    const activePax = passengers.filter(p => p.active !== false);
-    const activePaxIds = activePax.map(p => p.id);
-
-    const customDistances = {};
-    activePax.forEach(p => {
-        customDistances[p.id] = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
-    });
-
-    const tripCalc = window.CarpoolApp.calculateTripContributions(sampleTripDistance, activePaxIds, {
-        mileage: mileage,
-        petrolPrice: petrolPrice,
-        driverDistance: driver?.distance || 18,
-        passengerDistances: customDistances
-    });
-
-    let html = `
-FRIEND CARPOOL CALCULATION (ZERO PROFIT)
-========================================
-DRIVER: ${driver ? driver.name : 'Vivek'} | Distance: ${tripCalc.driverDistance} km
-CAR: ${settings.carName || 'Tata Tiago'} | Mileage: ${mileage} km/l | Petrol Price: ₹${petrolPrice}/L
-RATE PER KM: ₹${petrolPrice} ÷ ${mileage} km/l = ₹${ratePerKm.toFixed(2)}/km
-
-SAMPLE TRIP:
-Actual Trip Distance: ${sampleTripDistance} km
-Total Trip Cost: ${sampleTripDistance} km × ₹${ratePerKm.toFixed(2)}/km = ₹${tripCalc.totalTripCost.toFixed(2)}
-
-PERSON DISTANCES:
-• ${driver ? driver.name : 'Vivek'} (Driver): ${tripCalc.driverDistance} km
-`;
-
-    activePax.forEach(p => {
-        const dist = customDistances[p.id] || 0;
-        html += `• ${p.name} (Passenger): ${dist} km\n`;
-    });
-
-    html += `Total Person Distance: ${tripCalc.totalPersonDistance} km
-
-CONTRIBUTION BREAKDOWN:
-• ${driver ? driver.name : 'Vivek'} (Your Share): (${tripCalc.driverDistance} / ${tripCalc.totalPersonDistance}) × ₹${tripCalc.totalTripCost.toFixed(2)} = ₹${tripCalc.driverContribution.toFixed(2)}
-`;
-
-    activePax.forEach(p => {
-        const dist = customDistances[p.id] || 0;
-        const share = tripCalc.passengerContributions[p.id] || 0;
-        html += `• ${p.name}: (${dist} / ${tripCalc.totalPersonDistance}) × ₹${tripCalc.totalTripCost.toFixed(2)} = ₹${share.toFixed(2)}\n`;
-    });
-
-    html += `
-----------------------------------------
-Total Contributions: ₹${(tripCalc.driverContribution + tripCalc.friendsContribution).toFixed(2)}
-Friends' Total Contribution: ₹${tripCalc.friendsContribution.toFixed(2)}
-Driver Profit: ₹0.00
-`;
-
-    debugEl.textContent = html;
 }

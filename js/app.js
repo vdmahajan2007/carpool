@@ -797,13 +797,34 @@
 
     // ── WhatsApp Deep Link Helper ─────────────────────────────
     function openWhatsApp(phone, message) {
-        var cleanPhone = (phone || '').replace(/[^0-9]/g, '');
-        var encoded = encodeURIComponent(message);
+        var cleanPhone = (phone || '').toString().replace(/[^0-9]/g, '');
+        // Auto-fix 10-digit Indian numbers without country code (e.g. 9876543210 -> 919876543210)
+        if (cleanPhone.length === 10 && /^[6-9]/.test(cleanPhone)) {
+            cleanPhone = '91' + cleanPhone;
+        } else if (cleanPhone.length === 11 && cleanPhone.startsWith('0')) {
+            cleanPhone = '91' + cleanPhone.substring(1);
+        }
+
+        var encoded = encodeURIComponent(message || '');
         var url = cleanPhone
-            ? 'https://wa.me/' + cleanPhone + '?text=' + encoded
-            : 'https://wa.me/?text=' + encoded;
-        window.open(url, '_blank');
-        showToast('WhatsApp opened. Please press Send in WhatsApp.', 'info');
+            ? 'https://api.whatsapp.com/send?phone=' + cleanPhone + '&text=' + encoded
+            : 'https://api.whatsapp.com/send?text=' + encoded;
+
+        try {
+            var win = window.open(url, '_blank');
+            if (!win || win.closed || typeof win.closed === 'undefined') {
+                var a = document.createElement('a');
+                a.href = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        } catch (e) {
+            window.location.href = url;
+        }
+        showToast('Opening WhatsApp...', 'success');
     }
 
     async function copyToClipboard(text) {
