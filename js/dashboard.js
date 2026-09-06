@@ -29,6 +29,7 @@ async function renderStatCards() {
     const trips = await window.CarpoolApp.getTrips({ month, year }) || [];
     const passengers = window.CarpoolApp.getPassengers() || [];
     const settings = window.CarpoolApp.getSettings();
+    const allPayments = await window.CarpoolApp.getPayments({ month, year }) || [];
     
     let totalTrips = trips.length;
     let totalKm = 0;
@@ -38,7 +39,17 @@ async function renderStatCards() {
     let driverTotalContribution = 0;
     
     let passengerShares = {};
-    passengers.forEach(p => passengerShares[p.id] = 0);
+    let passengerPaid = {};
+    passengers.forEach(p => {
+        passengerShares[p.id] = 0;
+        passengerPaid[p.id] = 0;
+    });
+
+    allPayments.forEach(pay => {
+        if (passengerPaid[pay.personId] !== undefined) {
+            passengerPaid[pay.personId] += parseFloat(pay.amount || 0);
+        }
+    });
     
     trips.forEach(t => {
         const dist = parseFloat(t.actualDistance || t.actualRouteDistance || 0);
@@ -117,14 +128,25 @@ async function renderStatCards() {
 
     activePax.forEach((p, index) => {
         const colorClass = colors[index % colors.length];
-        const amount = passengerShares[p.id] || 0;
+        const grossAmount = passengerShares[p.id] || 0;
+        const paid = passengerPaid[p.id] || 0;
+        const pendingDue = Math.max(0, parseFloat((grossAmount - paid).toFixed(2)));
+
         statCardsHtml += `
             <div class="col-6 col-md-4 col-lg-3">
                 <div class="stat-card">
-                    <div class="stat-icon ${colorClass}"><i class="bi bi-person-fill"></i></div>
-                    <div class="stat-label text-truncate" style="max-width: 100%;">${window.CarpoolApp.escapeHtml(p.name)} Due</div>
-                    <div class="stat-value">${window.CarpoolApp.formatCurrency(amount)}</div>
-                    <div class="stat-sub">${p.pickupDistance || p.distance || 0}km distance</div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="stat-icon ${colorClass} mb-0"><i class="bi bi-person-fill"></i></div>
+                        <span class="badge ${pendingDue === 0 && grossAmount > 0 ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning-emphasis'} rounded-pill px-2 py-1 small">
+                            ${pendingDue === 0 && grossAmount > 0 ? 'Settled' : (grossAmount === 0 ? 'No Dues' : 'Pending')}
+                        </span>
+                    </div>
+                    <div class="stat-label text-truncate" style="max-width: 100%;">${window.CarpoolApp.escapeHtml(p.name)}</div>
+                    <div class="stat-value ${pendingDue > 0 ? 'text-danger' : 'text-success'}">${window.CarpoolApp.formatCurrency(pendingDue)}</div>
+                    <div class="stat-sub d-flex justify-content-between">
+                        <span>Total: ${window.CarpoolApp.formatCurrency(grossAmount)}</span>
+                        <span>Paid: ${window.CarpoolApp.formatCurrency(paid)}</span>
+                    </div>
                 </div>
             </div>
         `;
@@ -202,7 +224,6 @@ function renderCurrentTripSection() {
                 await window.CarpoolTracker.endTrip();
                 renderCurrentTripSection();
                 await renderStatCards();
-                renderDebugPanel();
             };
         }
 
@@ -613,7 +634,6 @@ function renderQuickTripEntry() {
         try {
             await window.CarpoolApp.saveTrip(tripData);
             await renderStatCards();
-            renderDebugPanel();
             
             // Reset selection
             document.getElementById('typeOffice').checked = true;

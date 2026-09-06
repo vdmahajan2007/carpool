@@ -270,8 +270,38 @@
     }
 
     // ── Payments CRUD ─────────────────────────────────────────
+    function getLocalPayments() {
+        try {
+            return JSON.parse(localStorage.getItem('carpool_local_payments') || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveLocalPayment(payment) {
+        try {
+            const list = getLocalPayments().filter(p => p.id !== payment.id);
+            list.push(payment);
+            localStorage.setItem('carpool_local_payments', JSON.stringify(list));
+        } catch (e) {
+            console.error('Error saving local payment:', e);
+        }
+    }
+
+    function deleteLocalPayment(id) {
+        try {
+            const list = getLocalPayments().filter(p => p.id !== id);
+            localStorage.setItem('carpool_local_payments', JSON.stringify(list));
+        } catch (e) {
+            console.error('Error deleting local payment:', e);
+        }
+    }
+
     async function getPayments(filters) {
         filters = filters || {};
+        let payments = [];
+        let fetchedFromDb = false;
+
         try {
             let query = db.collection('payments');
             if (filters.personId) query = query.where('personId', '==', filters.personId);
@@ -279,38 +309,61 @@
                 query = query.where('month', '==', filters.month).where('year', '==', filters.year);
             }
             const snapshot = await query.get();
-            const payments = [];
             snapshot.forEach(doc => payments.push({ id: doc.id, ...doc.data() }));
-            return payments;
+            fetchedFromDb = true;
         } catch (error) {
-            console.error('Error loading payments:', error);
-            return [];
+            console.warn('Could not fetch payments from Firestore, falling back to local cache:', error);
         }
+
+        // Merge with local payments
+        const localList = getLocalPayments();
+        localList.forEach(lp => {
+            if (!payments.find(p => p.id === lp.id)) {
+                let match = true;
+                if (filters.personId && lp.personId !== filters.personId) match = false;
+                if (filters.month !== undefined && lp.month !== filters.month) match = false;
+                if (filters.year !== undefined && lp.year !== filters.year) match = false;
+                if (match) payments.push(lp);
+            }
+        });
+
+        return payments;
     }
 
     async function savePayment(data) {
+        const id = data.id || generateId();
+        const paymentData = { 
+            ...data, 
+            id: id,
+            createdAt: new Date().toISOString() 
+        };
+
+        // Always save to local storage immediately
+        saveLocalPayment(paymentData);
+
         try {
-            const id = data.id || generateId();
-            const paymentData = { ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
-            delete paymentData.id;
-            await db.collection('payments').doc(id).set(paymentData, { merge: true });
-            showToast('Payment recorded.', 'success');
+            const firestoreData = { ...paymentData, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+            delete firestoreData.id;
+            await db.collection('payments').doc(id).set(firestoreData, { merge: true });
+            showToast('Payment recorded successfully.', 'success');
             return id;
         } catch (error) {
-            console.error('Error saving payment:', error);
-            showToast('Failed to record payment.', 'danger');
-            return null;
+            console.warn('Firestore payment save failed, stored locally:', error);
+            showToast('Payment recorded locally.', 'success');
+            return id;
         }
     }
 
     async function deletePayment(id) {
+        deleteLocalPayment(id);
         try {
             await db.collection('payments').doc(id).delete();
             showToast('Payment deleted.', 'success');
             return true;
         } catch (error) {
-            console.error('Error deleting payment:', error);
-            return false;
+            console.warn('Firestore delete failed, removed locally:', error);
+            showToast('Payment deleted.', 'success');
+            return true;
         }
     }
 
@@ -692,11 +745,14 @@
 
         sidebar.innerHTML =
             '<div class="sidebar-brand">' +
-            '<i class="bi bi-car-front-fill"></i>' +
-            '<span>Carpool</span></div>' +
+            '<div class="brand-icon"><i class="bi bi-car-front-fill"></i></div>' +
+            '<div class="brand-text">' +
+            '<span class="brand-title">MAHLE</span>' +
+            '<span class="brand-subtitle">RideMate</span>' +
+            '</div></div>' +
             '<nav class="sidebar-nav">' + navLinks + '</nav>' +
             '<div class="sidebar-footer">' +
-            '<small class="text-muted">Carpool Tracker v2.0</small></div>';
+            '<small class="text-white-50" style="font-size:0.75rem;"><i class="bi bi-shield-check me-1 text-success"></i> MAHLE RideMate v2.5</small></div>';
     }
 
     function renderTopBar(activePage) {
@@ -711,14 +767,21 @@
 
         topbar.innerHTML =
             '<div class="d-flex align-items-center justify-content-between w-100 px-3 px-md-4">' +
-            '<div class="d-flex align-items-center gap-2">' +
-            '<div><h6 class="mb-0 d-md-none">' + pageTitle + '</h6>' +
-            '<h6 class="mb-0 d-none d-md-block">' + monthYear + '</h6></div></div>' +
             '<div class="d-flex align-items-center gap-3">' +
+            '<div class="d-md-none brand-icon" style="width:34px;height:34px;font-size:1.1rem;"><i class="bi bi-car-front-fill"></i></div>' +
+            '<div><h6 class="mb-0 fw-bold d-md-none text-primary">' + (pageTitle === 'Dashboard' ? 'MAHLE RideMate' : pageTitle) + '</h6>' +
+            '<div class="d-none d-md-flex align-items-center gap-2">' +
+            '<span class="badge bg-primary-subtle text-primary border px-3 py-2 rounded-pill fw-bold"><i class="bi bi-calendar3 me-1"></i> ' + monthYear + '</span>' +
+            '<span class="badge bg-light text-secondary border px-3 py-2 rounded-pill fw-medium">Zero-Profit Friend Carpool</span>' +
+            '</div></div></div>' +
+            '<div class="d-flex align-items-center gap-2">' +
             '<span id="topbarLiveIndicator" class="live-badge d-none">' +
             '<span class="live-dot"></span> LIVE</span>' +
-            '<span class="text-muted d-none d-md-inline">' +
-            '<i class="bi bi-person-circle"></i> ' + driverName + '</span></div></div>';
+            '<div class="d-flex align-items-center gap-2 px-3 py-1 bg-light border rounded-pill">' +
+            '<i class="bi bi-person-circle text-primary fs-5"></i>' +
+            '<span class="fw-bold small text-dark">' + driverName + '</span>' +
+            '<span class="badge bg-primary text-white rounded-pill" style="font-size:0.65rem;">Driver</span>' +
+            '</div></div></div>';
     }
 
     function renderBottomNav(activePage) {
