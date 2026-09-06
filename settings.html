@@ -72,57 +72,7 @@
                     </div>
                 </div>
 
-                <!-- Expense Sharing Mode Card -->
-                <div class="card shadow-sm border-0 rounded-4 mb-4">
-                    <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
-                        <h5 class="fw-bold mb-0 text-primary"><i class="bi bi-pie-chart me-2"></i>Expense Sharing Policy</h5>
-                    </div>
-                    <div class="card-body p-4">
-                        <div class="mb-3">
-                            <div class="form-check p-3 border rounded-3 mb-2 bg-light">
-                                <input class="form-check-input" type="radio" name="sharingMode" id="modeDistance" value="distance" checked>
-                                <label class="form-check-label fw-bold d-block" for="modeDistance">
-                                    <span class="badge bg-primary rounded-pill me-1">Recommended</span> Distance Based
-                                </label>
-                                <div class="text-muted small mt-1">Passenger Charge = Passenger Chargeable Distance × Rate Per KM (₹/km). Each passenger pays strictly for the distance they ride.</div>
-                            </div>
-                            <div class="form-check p-3 border rounded-3 mb-2">
-                                <input class="form-check-input" type="radio" name="sharingMode" id="modeEqual" value="equal">
-                                <label class="form-check-label fw-bold d-block" for="modeEqual">Equal Split</label>
-                                <div class="text-muted small mt-1">Total trip fuel cost divided equally among all passengers AND the driver (Total ÷ [N + 1]).</div>
-                            </div>
-                            <div class="form-check p-3 border rounded-3 mb-2">
-                                <input class="form-check-input" type="radio" name="sharingMode" id="modePassengerOnly" value="passenger_only">
-                                <label class="form-check-label fw-bold d-block" for="modePassengerOnly">Passenger Only</label>
-                                <div class="text-muted small mt-1">Total fuel cost divided equally among passengers only. Driver pays nothing (Total ÷ N).</div>
-                            </div>
-                            <div class="form-check p-3 border rounded-3 mb-2">
-                                <input class="form-check-input" type="radio" name="sharingMode" id="modeCustomPercentage" value="custom_percentage">
-                                <label class="form-check-label fw-bold d-block" for="modeCustomPercentage">Custom Percentage</label>
-                                <div class="text-muted small mt-1">Specify exact percentage contribution for each person (sum must equal 100%).</div>
-                            </div>
-                            <div class="form-check p-3 border rounded-3">
-                                <input class="form-check-input" type="radio" name="sharingMode" id="modeCustomAmount" value="custom_amount">
-                                <label class="form-check-label fw-bold d-block" for="modeCustomAmount">Custom Amount (Per Trip)</label>
-                                <div class="text-muted small mt-1">Amounts manually entered for each passenger during trip entry.</div>
-                            </div>
-                        </div>
-                        
-                        <!-- Custom Percentage Config -->
-                        <div id="customPercentageContainer" class="d-none mt-3 p-3 bg-light rounded-3 border">
-                            <h6 class="fw-bold small mb-2">Configure Member Percentages</h6>
-                            <div id="customPercentageInputs" class="row g-3">
-                                <!-- Populated by JS -->
-                            </div>
-                            <div class="mt-3 text-end fw-bold" id="percentageTotalText">
-                                Total: <span id="percentageTotal">0</span>%
-                            </div>
-                            <div class="invalid-feedback d-block d-none text-danger" id="percentageError">
-                                Percentages must sum exactly to 100%.
-                            </div>
-                        </div>
-                    </div>
-                </div>
+
 
                 <!-- Trip Settings Card -->
                 <div class="card shadow-sm border-0 rounded-4 mb-4">
