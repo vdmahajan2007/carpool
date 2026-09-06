@@ -269,15 +269,26 @@ window.CarpoolTracker = (function() {
 
             const pIds = liveData?.passengerIds || liveData?.passengers || [];
             const passengerDetails = liveData?.passengerDetails || {};
-            const passengerShares = {};
+            const customData = { passengerDistances: {} };
+            pIds.forEach(pid => {
+                if (passengerDetails[pid]) {
+                    customData.passengerDistances[pid] = passengerDetails[pid].finalDistance || passengerDetails[pid].chargeableDistance;
+                } else {
+                    const pObj = window.CarpoolApp.getPeople().find(x => x.id === pid || x.name === pid);
+                    customData.passengerDistances[pid] = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
+                }
+            });
+
+            const passengerShares = window.CarpoolApp.calculateShares(fuelCost, pIds, settings.sharingMode, customData, {
+                ratePerKm: ratePerKm,
+                petrolPrice: petrolPrice,
+                mileage: mileage,
+                actualDistance: distance
+            });
 
             pIds.forEach(pid => {
                 if (passengerDetails[pid]) {
-                    passengerShares[pid] = passengerDetails[pid].amount;
-                } else {
-                    const pObj = window.CarpoolApp.getPeople().find(x => x.id === pid || x.name === pid);
-                    const pDist = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
-                    passengerShares[pid] = parseFloat((pDist * ratePerKm).toFixed(2));
+                    passengerDetails[pid].amount = passengerShares[pid];
                 }
             });
 

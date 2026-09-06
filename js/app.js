@@ -329,16 +329,25 @@
     }
 
     /**
-     * Calculate total fuel cost: Fuel Used × Petrol Price
+     * Calculate Total Trip Cost strictly based on Actual Trip Distance × Cost per KM.
+     * Formula: Total Trip Cost = (Actual Trip Distance / Mileage) × Petrol Price
+     * Example: 18 km with 12 km/l @ ₹120/l (₹10/km) = ₹180.00
      */
-    function calculateFuelCost(distance, mileage, petrolPrice) {
-        var fuel = calculateFuelUsed(distance, mileage);
+    function calculateTotalTripCost(actualTripDistance, mileage, petrolPrice) {
+        if (!actualTripDistance || actualTripDistance <= 0) return 0;
+        mileage = mileage || (getSettings().mileage || 12);
+        petrolPrice = petrolPrice || (getSettings().petrolPrice || 105);
+        var fuel = calculateFuelUsed(actualTripDistance, mileage);
         return parseFloat((fuel * petrolPrice).toFixed(2));
+    }
+
+    function calculateFuelCost(distance, mileage, petrolPrice) {
+        return calculateTotalTripCost(distance, mileage, petrolPrice);
     }
 
     /**
      * Calculate the rate per kilometer based on petrol price and mileage: Petrol Price / Mileage
-     * Example: ₹105 / 12 km/l = ₹8.75 per km
+     * Example: ₹120 / 12 km/l = ₹10.00 per km
      */
     function calculateRatePerKm(petrolPrice, mileage) {
         if (!mileage || mileage <= 0 || !petrolPrice || petrolPrice <= 0) return 0;
@@ -411,101 +420,159 @@
     }
 
     /**
-     * Calculate each passenger's share of the fuel cost across all 5 modes:
-     * 1. distance / distance-based: Passenger Charge = Passenger Chargeable Distance × Rate Per KM
-     * 2. equal: Total Trip Cost / (Passengers + Driver)
-     * 3. passenger-only: Total Trip Cost / Passengers
-     * 4. custom-percentage: Total Trip Cost × (Percentage / 100)
-     * 5. custom-amount: Manually entered amount
+     * Calculate each passenger's proportional share of the Total Trip Cost.
+     * Enforces FRIENDS CARPOOL NO-PROFIT principle:
+     * 1. Total Trip Cost = Actual Car Distance × Rate per KM
+     * 2. SUM(all passenger charges) === Total Trip Cost
+     * 3. Driver Profit === ₹0
+     * 4. Proportional distribution:
+     *    Passenger Share = (Total Trip Cost × Passenger Applicable KM) / Total Applicable Passenger KM
      *
-     * @param {number} totalCost - Total fuel cost for the trip
+     * @param {number} totalTripCost - Total actual fuel cost for the trip
      * @param {Array} passengers - Array of passenger IDs or objects
      * @param {string} mode - Sharing mode
-     * @param {Object} customData - { percentages: {}, amounts: {}, passengerDistances: {} }
+     * @param {Object} customData - { passengerDistances: {}, percentages: {}, amounts: {} }
      * @param {Object} meta - { ratePerKm, petrolPrice, mileage, actualDistance }
      * @returns {Object} shares keyed by passenger ID
      */
-    function calculateShares(totalCost, passengers, mode, customData, meta) {
+    function calculateShares(totalTripCost, passengers, mode, customData, meta) {
         var shares = {};
         if (!passengers || passengers.length === 0) return shares;
+
         customData = customData || {};
         meta = meta || {};
+        totalTripCost = parseFloat(parseFloat(totalTripCost || 0).toFixed(2));
+
+        if (totalTripCost <= 0) {
+            passengers.forEach(function (p) { shares[p.id || p] = 0; });
+            return shares;
+        }
 
         const settings = getSettings();
-        const petrolPrice = meta.petrolPrice || settings.petrolPrice || 105;
-        const mileage = meta.mileage || settings.mileage || 12;
-        const ratePerKm = meta.ratePerKm || calculateRatePerKm(petrolPrice, mileage);
-
         const normalizedMode = (mode || settings.sharingMode || 'distance').toLowerCase();
 
         switch (normalizedMode) {
             case 'distance':
             case 'distance-based':
             case 'distance_based': {
+                // 1. Gather applicable distance for each passenger
+                let totalApplicableDist = 0;
+                const paxDistances = {};
+
                 passengers.forEach(function (p) {
                     const pid = p.id || p;
-                    let chargeableDist = 0;
+                    let dist = 0;
 
                     if (customData.passengerDistances && customData.passengerDistances[pid] !== undefined) {
-                        chargeableDist = parseFloat(customData.passengerDistances[pid]);
+                        dist = parseFloat(customData.passengerDistances[pid]) || 0;
                     } else if (p.finalDistance !== undefined) {
-                        chargeableDist = parseFloat(p.finalDistance);
+                        dist = parseFloat(p.finalDistance) || 0;
                     } else if (p.chargeableDistance !== undefined) {
-                        chargeableDist = parseFloat(p.chargeableDistance);
+                        dist = parseFloat(p.chargeableDistance) || 0;
                     } else {
                         const pObj = getPeople().find(x => x.id === pid);
-                        chargeableDist = pObj ? parseFloat(pObj.pickupDistance || pObj.distance || 0) : 0;
+                        dist = pObj ? parseFloat(pObj.pickupDistance || pObj.distance || 0) : 0;
                     }
 
-                    // Chargeable Distance × Rate per KM
-                    const charge = parseFloat((chargeableDist * ratePerKm).toFixed(2));
-                    shares[pid] = charge;
+                    paxDistances[pid] = dist;
+                    totalApplicableDist += dist;
                 });
+
+                // If all distances are 0, fall back to equal division among participating passengers
+                if (totalApplicableDist <= 0) {
+                    const perPax = parseFloat((totalTripCost / passengers.length).toFixed(2));
+                    passengers.forEach(function (p) {
+                        shares[p.id || p] = perPax;
+                    });
+                } else {
+                    // Proportional distribution: (Total Cost × Passenger Dist) / Total Applicable Dist
+                    let runningSum = 0;
+                    let maxPid = null;
+                    let maxDist = -1;
+
+                    passengers.forEach(function (p) {
+                        const pid = p.id || p;
+                        const dist = paxDistances[pid];
+                        const rawShare = (totalTripCost * dist) / totalApplicableDist;
+                        const roundedShare = parseFloat(rawShare.toFixed(2));
+                        shares[pid] = roundedShare;
+                        runningSum += roundedShare;
+
+                        if (dist > maxDist) {
+                            maxDist = dist;
+                            maxPid = pid;
+                        }
+                    });
+
+                    // Rounding adjustment: Ensure SUM(passenger shares) === totalTripCost exactly (Driver Profit = ₹0)
+                    const diff = parseFloat((totalTripCost - runningSum).toFixed(2));
+                    if (diff !== 0 && maxPid && shares[maxPid] !== undefined) {
+                        shares[maxPid] = parseFloat((shares[maxPid] + diff).toFixed(2));
+                    }
+                }
                 break;
             }
-            case 'equal': {
-                var totalPeople = passengers.length + 1; // driver included
-                var perPerson = parseFloat((totalCost / totalPeople).toFixed(2));
-                passengers.forEach(function (p) {
-                    shares[p.id || p] = perPerson;
-                });
-                break;
-            }
+
+            case 'equal':
             case 'passenger-only':
             case 'passenger_only': {
-                var perPassenger = parseFloat((totalCost / passengers.length).toFixed(2));
+                // Total trip cost shared equally among all passengers in the car
+                const count = passengers.length;
+                const baseShare = Math.floor((totalTripCost / count) * 100) / 100;
+                let runningSum = 0;
+
                 passengers.forEach(function (p) {
-                    shares[p.id || p] = perPassenger;
+                    const pid = p.id || p;
+                    shares[pid] = baseShare;
+                    runningSum += baseShare;
                 });
+
+                const diff = parseFloat((totalTripCost - runningSum).toFixed(2));
+                if (diff !== 0 && passengers.length > 0) {
+                    const firstPid = passengers[0].id || passengers[0];
+                    shares[firstPid] = parseFloat((shares[firstPid] + diff).toFixed(2));
+                }
                 break;
             }
+
             case 'custom-percentage':
             case 'custom_percentage': {
+                let runningSum = 0;
                 passengers.forEach(function (p) {
-                    var pid = p.id || p;
-                    var pct = (customData.percentages && customData.percentages[pid]) || (settings.customPercentages && settings.customPercentages[pid]) || 0;
-                    shares[pid] = parseFloat((totalCost * pct / 100).toFixed(2));
+                    const pid = p.id || p;
+                    const pct = (customData.percentages && customData.percentages[pid]) || (settings.customPercentages && settings.customPercentages[pid]) || 0;
+                    const amt = parseFloat((totalTripCost * pct / 100).toFixed(2));
+                    shares[pid] = amt;
+                    runningSum += amt;
                 });
                 break;
             }
+
             case 'custom-amount':
             case 'custom_amount': {
                 passengers.forEach(function (p) {
-                    var pid = p.id || p;
+                    const pid = p.id || p;
                     shares[pid] = parseFloat(((customData.amounts && customData.amounts[pid]) || 0).toFixed(2));
                 });
                 break;
             }
+
             default: {
-                // Default to distance based if available, otherwise equal split
-                passengers.forEach(function (p) {
+                let totalDist = 0;
+                passengers.forEach(p => {
                     const pid = p.id || p;
                     const pObj = getPeople().find(x => x.id === pid);
-                    const dist = pObj ? (pObj.pickupDistance || pObj.distance || 0) : 0;
-                    shares[pid] = parseFloat((dist * ratePerKm).toFixed(2));
+                    totalDist += pObj ? (pObj.pickupDistance || pObj.distance || 1) : 1;
+                });
+                passengers.forEach(p => {
+                    const pid = p.id || p;
+                    const pObj = getPeople().find(x => x.id === pid);
+                    const d = pObj ? (pObj.pickupDistance || pObj.distance || 1) : 1;
+                    shares[pid] = parseFloat(((totalTripCost * d) / totalDist).toFixed(2));
                 });
             }
         }
+
         return shares;
     }
 

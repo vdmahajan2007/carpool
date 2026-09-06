@@ -299,7 +299,6 @@ function showStartTripModal() {
 
     document.getElementById('modalDriverName').textContent = `${driver ? driver.name : 'Vivek'} (Starting from ${driver?.homeLocation || 'Home'})`;
     
-    // Default route distance: e.g. 19 km or driver distance
     const defaultRouteDist = settings.driverDistance || 17;
     document.getElementById('modalRouteDistance').value = defaultRouteDist;
 
@@ -334,7 +333,7 @@ function showStartTripModal() {
                 <span class="text-muted small">₹${ratePerKm.toFixed(2)}/km</span>
             </td>
             <td>
-                <strong class="text-primary pax-amount-preview" id="amountPreview_${p.id}">₹${(defaultPickupDist * ratePerKm).toFixed(2)}</strong>
+                <strong class="text-primary pax-amount-preview" id="amountPreview_${p.id}">₹0.00</strong>
             </td>
         `;
         tbody.appendChild(tr);
@@ -345,17 +344,36 @@ function showStartTripModal() {
     });
 
     document.getElementById('modalTripType').addEventListener('change', updateModalFares);
+    document.getElementById('modalRouteDistance').addEventListener('input', updateModalFares);
 
     function updateModalFares() {
         const tripType = document.getElementById('modalTripType').value;
         const multiplier = tripType === 'Full Day' ? 2 : 1;
+        const routeDist = parseFloat(document.getElementById('modalRouteDistance').value) || 19;
+        const fuelCost = window.CarpoolApp.calculateFuelCost(routeDist, mileage, petrolPrice);
+
+        const selectedPaxIds = Array.from(document.querySelectorAll('.start-trip-pax:checked')).map(cb => cb.value);
+
+        const customData = { passengerDistances: {} };
+        passengers.forEach(p => {
+            const distInput = document.querySelector(`.pax-dist-input[data-pid="${p.id}"]`);
+            const distVal = parseFloat(distInput ? distInput.value : 0) || (p.pickupDistance || p.distance || 10);
+            customData.passengerDistances[p.id] = distVal * multiplier;
+        });
+
+        const shares = window.CarpoolApp.calculateShares(fuelCost, selectedPaxIds, settings.sharingMode, customData, {
+            ratePerKm: ratePerKm,
+            petrolPrice: petrolPrice,
+            mileage: mileage,
+            actualDistance: routeDist
+        });
 
         passengers.forEach(p => {
-            const isChecked = document.getElementById(`startPax_${p.id}`).checked;
+            const isChecked = document.getElementById(`startPax_${p.id}`)?.checked;
             const distInput = document.querySelector(`.pax-dist-input[data-pid="${p.id}"]`);
-            const distVal = parseFloat(distInput.value) || 0;
+            const distVal = parseFloat(distInput ? distInput.value : 0) || 0;
             const chargeable = distVal * multiplier;
-            const amt = chargeable * ratePerKm;
+            const amt = shares[p.id] || 0;
 
             const chargeableEl = document.getElementById(`chargeableDist_${p.id}`);
             const amountEl = document.getElementById(`amountPreview_${p.id}`);
@@ -370,6 +388,7 @@ function showStartTripModal() {
         });
     }
 
+    updateModalFares();
     startTripModalInstance.show();
     
     document.getElementById('btnConfirmStartTrip').onclick = async () => {
@@ -381,15 +400,31 @@ function showStartTripModal() {
 
         const routeDist = parseFloat(document.getElementById('modalRouteDistance').value) || 19;
         const tripType = document.getElementById('modalTripType').value;
+        const fuelCost = window.CarpoolApp.calculateFuelCost(routeDist, mileage, petrolPrice);
+        const multiplier = tripType === 'Full Day' ? 2 : 1;
+
+        const customData = { passengerDistances: {} };
+        selected.forEach(pid => {
+            const pObj = passengers.find(x => x.id === pid);
+            const distInput = document.querySelector(`.pax-dist-input[data-pid="${pid}"]`);
+            const manualDist = distInput ? parseFloat(distInput.value) : (pObj?.pickupDistance || 10);
+            customData.passengerDistances[pid] = manualDist * multiplier;
+        });
+
+        const shares = window.CarpoolApp.calculateShares(fuelCost, selected, settings.sharingMode, customData, {
+            ratePerKm: ratePerKm,
+            petrolPrice: petrolPrice,
+            mileage: mileage,
+            actualDistance: routeDist
+        });
 
         const passengerDetails = {};
         selected.forEach((pid, idx) => {
             const pObj = passengers.find(x => x.id === pid);
             const distInput = document.querySelector(`.pax-dist-input[data-pid="${pid}"]`);
             const manualDist = distInput ? parseFloat(distInput.value) : (pObj?.pickupDistance || 10);
-            const multiplier = tripType === 'Full Day' ? 2 : 1;
             const finalDist = manualDist * multiplier;
-            const amount = parseFloat((finalDist * ratePerKm).toFixed(2));
+            const amount = shares[pid] !== undefined ? shares[pid] : parseFloat((finalDist * ratePerKm).toFixed(2));
 
             passengerDetails[pid] = {
                 passengerId: pid,
@@ -470,14 +505,26 @@ function renderQuickTripEntry() {
         const fuelCost = window.CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
         
         const multiplier = type === 'Full Day' ? 2 : 1;
-        const passengerDetails = {};
-        const passengerShares = {};
+        const customData = { passengerDistances: {} };
+        selectedPaxIds.forEach(pid => {
+            const pObj = passengers.find(x => x.id === pid);
+            const baseDist = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
+            customData.passengerDistances[pid] = baseDist * multiplier;
+        });
 
+        const passengerShares = window.CarpoolApp.calculateShares(fuelCost, selectedPaxIds, settings.sharingMode, customData, {
+            ratePerKm: ratePerKm,
+            petrolPrice: petrolPrice,
+            mileage: mileage,
+            actualDistance: distance
+        });
+
+        const passengerDetails = {};
         selectedPaxIds.forEach((pid, idx) => {
             const pObj = passengers.find(x => x.id === pid);
             const baseDist = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
             const finalDist = baseDist * multiplier;
-            const amount = parseFloat((finalDist * ratePerKm).toFixed(2));
+            const amount = passengerShares[pid] !== undefined ? passengerShares[pid] : parseFloat((finalDist * ratePerKm).toFixed(2));
 
             passengerDetails[pid] = {
                 passengerId: pid,
@@ -492,7 +539,6 @@ function renderQuickTripEntry() {
                 ratePerKm: ratePerKm,
                 amount: amount
             };
-            passengerShares[pid] = amount;
         });
 
         const tripData = {
@@ -545,28 +591,50 @@ function renderDebugPanel() {
     const petrolPrice = settings.petrolPrice || 105;
     const mileage = settings.mileage || 12;
     const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
+    const mode = settings.sharingMode || 'distance';
+
+    const sampleTripDistance = 19;
+    const totalTripCost = window.CarpoolApp.calculateFuelCost(sampleTripDistance, mileage, petrolPrice);
+    const activePaxIds = passengers.filter(p => p.active !== false).map(p => p.id);
+
+    const customData = { passengerDistances: {} };
+    passengers.forEach(p => {
+        customData.passengerDistances[p.id] = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
+    });
+
+    const calculatedShares = window.CarpoolApp.calculateShares(totalTripCost, activePaxIds, mode, customData, {
+        ratePerKm: ratePerKm,
+        petrolPrice: petrolPrice,
+        mileage: mileage,
+        actualDistance: sampleTripDistance
+    });
+
+    let modeLabel = 'Distance-Based Billing';
+    if (mode === 'equal') modeLabel = 'Equal Split (Total ÷ [Passengers + Driver])';
+    else if (mode === 'passenger_only' || mode === 'passenger-only') modeLabel = 'Passenger Only (Total ÷ Passengers)';
+    else if (mode === 'custom_percentage' || mode === 'custom-percentage') modeLabel = 'Custom Percentage';
 
     let html = `
 DRIVER: ${driver ? driver.name : 'Vivek'} (Base: ${driver?.distance || 17} km, Starting: ${driver?.homeLocation || 'Home'})
 CAR: ${settings.carName || 'Tata Tiago'} | Mileage: ${mileage} km/l | Petrol Price: ₹${petrolPrice}/L
-RATE PER KM FORMULA: ₹${petrolPrice} / ${mileage} km/l = ₹${ratePerKm.toFixed(2)}/km
-ACTIVE SHARING MODE: ${settings.sharingMode || 'distance'} (Distance-based billing)
+RATE PER KM: ₹${petrolPrice} / ${mileage} km/l = ₹${ratePerKm.toFixed(2)}/km
 
-EXAMPLE ROUTE BREAKDOWN:
+ACTIVE SHARING POLICY: [${mode.toUpperCase()}] — ${modeLabel}
+
+SAMPLE ROUTE BREAKDOWN:
 Vivek Home (0 km) → Jaydeep (9 km) → Madhura (12 km) → Office (19 km)
-Total Actual Car Route Distance = 19.0 km
+Total Route Distance = ${sampleTripDistance} km | Total Fuel Cost = ₹${totalTripCost.toFixed(2)}
 
-PASSENGER CHARGEABLE DISTANCES & CHARGES:
+PASSENGER SHARES UNDER CURRENT POLICY (${mode}):
 `;
 
     passengers.forEach((p, idx) => {
         const pDist = p.pickupDistance !== undefined ? p.pickupDistance : (p.distance || 10);
-        const amt = (pDist * ratePerKm).toFixed(2);
+        const share = calculatedShares[p.id] !== undefined ? calculatedShares[p.id] : (pDist * ratePerKm);
         html += `
-• [${p.name}] 
-  Pickup: ${p.pickupLocation || `${p.name} Landmark`} (Order: ${idx + 1})
-  Home-to-Office: ${p.distance || 0} km | Pickup Dist: ${pDist} km [Source: Manual Priority]
-  Chargeable Dist: ${pDist} km × ₹${ratePerKm.toFixed(2)}/km = ₹${amt}`;
+• [${p.name}] (Order: ${idx + 1})
+  Pickup: ${p.pickupLocation || `${p.name} Landmark`} | Pickup Dist: ${pDist} km
+  Assigned Fare: ₹${share.toFixed(2)}`;
     });
 
     debugEl.textContent = html;
