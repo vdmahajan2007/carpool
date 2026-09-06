@@ -63,6 +63,60 @@ CarpoolApp.init('settlement', async function() {
                 return;
             }
 
+            let totalMonthTripCost = 0;
+            let totalMonthDistance = 0;
+            let friendsTotalContribution = 0;
+            let driverTotalContribution = 0;
+
+            trips.forEach(t => {
+                const cost = parseFloat(t.fuelCost || 0);
+                const dist = parseFloat(t.actualRouteDistance || t.actualDistance || 0);
+                totalMonthTripCost += cost;
+                totalMonthDistance += dist;
+
+                let tripFriends = 0;
+                if (t.passengerShares) {
+                    for (let pid in t.passengerShares) {
+                        tripFriends += parseFloat(t.passengerShares[pid] || 0);
+                    }
+                }
+                friendsTotalContribution += tripFriends;
+                const dShare = t.driverContribution !== undefined 
+                    ? parseFloat(t.driverContribution || 0) 
+                    : Math.max(0, parseFloat((cost - tripFriends).toFixed(2)));
+                driverTotalContribution += dShare;
+            });
+
+            // Summary Header Card
+            let summaryCardHtml = `
+                <div class="card shadow-sm border-0 rounded-4 bg-primary text-white mb-4">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="fw-bold mb-0"><i class="bi bi-pie-chart-fill me-2"></i>${CarpoolApp.MONTHS[currentMonth]} ${currentYear} Summary</h5>
+                            <span class="badge bg-white text-primary rounded-pill px-3 py-1">Zero Profit Carpool</span>
+                        </div>
+                        <div class="row g-3 text-center">
+                            <div class="col-6 col-md-3">
+                                <div class="text-white-50 small">Total Car Distance</div>
+                                <div class="fs-5 fw-bold">${totalMonthDistance.toFixed(1)} km</div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="text-white-50 small">Total Trip Cost</div>
+                                <div class="fs-5 fw-bold">${CarpoolApp.formatCurrency(totalMonthTripCost)}</div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="text-white-50 small">Your Contribution</div>
+                                <div class="fs-5 fw-bold">${CarpoolApp.formatCurrency(driverTotalContribution)}</div>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <div class="text-white-50 small">Friends' Contribution</div>
+                                <div class="fs-5 fw-bold text-warning">${CarpoolApp.formatCurrency(friendsTotalContribution)}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
             let html = '';
             
             for (const person of passengers) {
@@ -128,9 +182,9 @@ CarpoolApp.init('settlement', async function() {
                     historyHtml = '<tr><td colspan="5" class="text-center text-muted small py-2">No payments recorded yet</td></tr>';
                 }
 
-                // WhatsApp message template with accurate message status
+                // WhatsApp message template: strict Friends Carpool (no profit/policy mention)
                 const driverName = driver ? driver.name : 'Vivek';
-                const msg = `Hi ${person.name} 👋\n\n${CarpoolApp.MONTHS[currentMonth]} ${currentYear} carpool expense is ${CarpoolApp.formatCurrency(totalAmount)}.\n\nTravel days: ${travelDays}\nTotal distance: ${totalPassengerDistance.toFixed(1)} km\nFuel cost share: ${CarpoolApp.formatCurrency(totalAmount)}\nPaid: ${CarpoolApp.formatCurrency(paidAmount)}\n\nPlease transfer ${CarpoolApp.formatCurrency(pendingAmount)} to ${driverName}.\n\nThank you! 🚗`;
+                const msg = `Hi ${person.name} 👋\n\nCarpool Expense for ${CarpoolApp.MONTHS[currentMonth]} ${currentYear}:\n\n• Travel Days: ${travelDays}\n• Your Distance: ${totalPassengerDistance.toFixed(1)} km\n• Your Contribution: ${CarpoolApp.formatCurrency(totalAmount)}\n• Already Paid: ${CarpoolApp.formatCurrency(paidAmount)}\n• Pending Due: ${CarpoolApp.formatCurrency(pendingAmount)}\n\n(Driver Profit: ₹0 • Fair Distance Sharing)\n\nPlease transfer ${CarpoolApp.formatCurrency(pendingAmount)} to ${driverName}.\n\nThank you! 🚗`;
                 const encodedMsg = encodeURIComponent(msg);
 
                 html += `
@@ -157,7 +211,7 @@ CarpoolApp.init('settlement', async function() {
                                     </div>
                                     <div class="col-6">
                                         <div class="p-2 bg-light rounded-3">
-                                            <span class="text-muted d-block small">Total Share</span>
+                                            <span class="text-muted d-block small">Your Contribution</span>
                                             <strong class="fs-6 text-primary">${CarpoolApp.formatCurrency(totalAmount)}</strong>
                                         </div>
                                     </div>
@@ -217,7 +271,7 @@ CarpoolApp.init('settlement', async function() {
                 `;
             }
 
-            container.innerHTML = `<div class="row g-4">${html}</div>`;
+            container.innerHTML = summaryCardHtml + `<div class="row g-4">${html}</div>`;
 
             // Attach event listeners
             container.querySelectorAll('.record-payment-btn').forEach(btn => {

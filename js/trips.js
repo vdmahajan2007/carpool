@@ -202,8 +202,9 @@ CarpoolApp.init('trips', async function() {
         const tripType = getSelectedTripType();
         const multiplier = tripType === 'Full Day' ? 2 : 1;
 
-        liveSharingModeBadge.textContent = settings.sharingMode === 'equal' ? 'Equal Split' : 
-                                          (settings.sharingMode === 'passenger-only' ? 'Passenger Only' : 'Distance Based');
+        if (liveSharingModeBadge) {
+            liveSharingModeBadge.textContent = 'Distance Proportional';
+        }
         
         if (status !== 'Completed') {
             calcFuelUsed.textContent = '0.00 L';
@@ -221,44 +222,66 @@ CarpoolApp.init('trips', async function() {
         calcRatePerKm.textContent = `₹${ratePerKm.toFixed(2)}/km`;
         
         const selectedPassengerIds = getSelectedPassengers();
-        if (selectedPassengerIds.length === 0) {
-            calcShares.innerHTML = '<span class="text-muted small">No passengers selected</span>';
-            return;
-        }
         
-        const customData = { passengerDistances: {} };
+        const customDistances = {};
         selectedPassengerIds.forEach(pid => {
             const distInp = document.getElementById(`paxDist_${pid}`);
             const manualVal = distInp ? parseFloat(distInp.value) || 0 : 0;
-            customData.passengerDistances[pid] = manualVal * multiplier;
+            customDistances[pid] = manualVal * multiplier;
         });
-        
-        const shares = CarpoolApp.calculateShares(fuelCost, selectedPassengerIds, settings.sharingMode || 'distance', customData, {
-            ratePerKm: ratePerKm,
-            petrolPrice: petrolPrice,
-            mileage: mileage,
-            actualDistance: distance
-        });
-        
-        let sharesHtml = '<div class="d-flex flex-column gap-1">';
-        for (const [id, amount] of Object.entries(shares)) {
-            const p = passengers.find(x => x.id === id);
-            const name = p ? p.name : id;
-            const distInp = document.getElementById(`paxDist_${id}`);
-            const baseDist = distInp ? parseFloat(distInp.value) || 0 : 0;
-            const chargeableDist = baseDist * multiplier;
 
-            sharesHtml += `
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>
-                        <strong>${CarpoolApp.escapeHtml(name)}</strong> 
-                        <span class="badge bg-light text-muted border ms-1">${chargeableDist.toFixed(1)} km</span>
-                    </span>
-                    <strong class="text-primary">${CarpoolApp.formatCurrency(amount)}</strong>
-                </div>
-            `;
+        const driverObj = driver || CarpoolApp.getDriver();
+        const driverBaseDist = driverObj ? (driverObj.pickupDistance || driverObj.distance || 18) : (settings.driverDistance || 18);
+        const driverDist = driverBaseDist * multiplier;
+
+        const tripCalc = CarpoolApp.calculateTripContributions(distance, selectedPassengerIds, {
+            mileage: mileage,
+            petrolPrice: petrolPrice,
+            driverDistance: driverDist,
+            passengerDistances: customDistances
+        });
+        
+        let sharesHtml = '<div class="d-flex flex-column gap-2">';
+        
+        // Driver Contribution row
+        sharesHtml += `
+            <div class="d-flex justify-content-between align-items-center p-2 bg-light rounded-2 border">
+                <span>
+                    <strong class="text-dark">${CarpoolApp.escapeHtml(driverObj ? driverObj.name : 'Vivek')}</strong> 
+                    <span class="badge bg-primary text-white ms-1">Driver (${tripCalc.driverDistance.toFixed(1)} km)</span>
+                </span>
+                <strong class="text-primary">${CarpoolApp.formatCurrency(tripCalc.driverContribution)} <small class="text-muted fw-normal">(Your Share)</small></strong>
+            </div>
+        `;
+
+        if (selectedPassengerIds.length === 0) {
+            sharesHtml += '<div class="text-muted small py-1">No passengers selected for this trip.</div>';
+        } else {
+            selectedPassengerIds.forEach(id => {
+                const p = passengers.find(x => x.id === id);
+                const name = p ? p.name : id;
+                const pDist = customDistances[id] || 0;
+                const shareAmt = tripCalc.passengerContributions[id] || 0;
+
+                sharesHtml += `
+                    <div class="d-flex justify-content-between align-items-center px-1">
+                        <span>
+                            <strong>${CarpoolApp.escapeHtml(name)}</strong> 
+                            <span class="badge bg-light text-muted border ms-1">${pDist.toFixed(1)} km</span>
+                        </span>
+                        <strong class="text-success">${CarpoolApp.formatCurrency(shareAmt)}</strong>
+                    </div>
+                `;
+            });
         }
-        sharesHtml += '</div>';
+
+        sharesHtml += `
+            <div class="d-flex justify-content-between align-items-center pt-2 border-top small text-muted">
+                <span>Total Person Distance: <strong>${tripCalc.totalPersonDistance} km</strong></span>
+                <span>Driver Profit: <strong class="text-success">₹0.00</strong></span>
+            </div>
+        </div>`;
+
         calcShares.innerHTML = sharesHtml;
     }
     
@@ -286,32 +309,51 @@ CarpoolApp.init('trips', async function() {
         const petrolPrice = settings.petrolPrice || 105;
         const mileage = settings.mileage || 12;
         const ratePerKm = CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
-
-        let fuelUsed = 0;
-        let fuelCost = 0;
-        let passengerDetails = {};
-        let passengerShares = {};
+        const fuelUsed = CarpoolApp.calculateFuelUsed(distance, mileage);
+        const fuelCost = CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
         const multiplier = type === 'Full Day' ? 2 : 1;
         
+        const driverObj = driver || CarpoolApp.getDriver();
+        const driverBaseDist = driverObj ? (driverObj.pickupDistance || driverObj.distance || 18) : (settings.driverDistance || 18);
+        const driverDist = driverBaseDist * multiplier;
+
+        let passengerDetails = {};
+        let tripCalc = {
+            driverContribution: fuelCost,
+            passengerContributions: {},
+            friendsContribution: 0,
+            totalTripCost: fuelCost
+        };
+        
         if (status === 'Completed') {
-            fuelUsed = CarpoolApp.calculateFuelUsed(distance, mileage);
-            fuelCost = CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
-            
-            const customData = { passengerDistances: {} };
+            const customDistances = {};
             selectedPassengers.forEach(pid => {
                 const p = passengers.find(x => x.id === pid);
                 const distInp = document.getElementById(`paxDist_${pid}`);
                 const manualBaseDist = distInp ? parseFloat(distInp.value) || (p?.pickupDistance || p?.distance || 10) : 10;
                 const finalDist = parseFloat((manualBaseDist * multiplier).toFixed(1));
-                
-                customData.passengerDistances[pid] = finalDist;
+                customDistances[pid] = finalDist;
+            });
 
-                const amt = parseFloat((finalDist * ratePerKm).toFixed(2));
+            tripCalc = CarpoolApp.calculateTripContributions(distance, selectedPassengers, {
+                mileage: mileage,
+                petrolPrice: petrolPrice,
+                driverDistance: driverDist,
+                passengerDistances: customDistances
+            });
+
+            selectedPassengers.forEach((pid, idx) => {
+                const p = passengers.find(x => x.id === pid);
+                const distInp = document.getElementById(`paxDist_${pid}`);
+                const manualBaseDist = distInp ? parseFloat(distInp.value) || (p?.pickupDistance || p?.distance || 10) : 10;
+                const finalDist = customDistances[pid];
+                const amt = tripCalc.passengerContributions[pid] || 0;
+
                 passengerDetails[pid] = {
                     passengerId: pid,
                     passengerName: p ? p.name : pid,
                     pickupLocation: p?.pickupLocation || `${p?.name} Pickup`,
-                    pickupOrder: selectedPassengers.indexOf(pid) + 1,
+                    pickupOrder: idx + 1,
                     calculatedPickupDistance: p?.distance || 10,
                     manualPickupDistance: manualBaseDist,
                     finalPickupDistance: finalDist,
@@ -321,20 +363,6 @@ CarpoolApp.init('trips', async function() {
                     amount: amt
                 };
             });
-
-            passengerShares = CarpoolApp.calculateShares(fuelCost, selectedPassengers, settings.sharingMode || 'distance', customData, {
-                ratePerKm: ratePerKm,
-                petrolPrice: petrolPrice,
-                mileage: mileage,
-                actualDistance: distance
-            });
-
-            // Sync amounts in passengerDetails with computed shares
-            for (let pid in passengerShares) {
-                if (passengerDetails[pid]) {
-                    passengerDetails[pid].amount = passengerShares[pid];
-                }
-            }
         }
         
         const tripData = {
@@ -350,12 +378,14 @@ CarpoolApp.init('trips', async function() {
             finalRouteDistance: distance,
             distanceSource: overrideDistance.checked ? 'manual' : 'calculated',
             fuelUsed,
-            fuelCost,
+            fuelCost: tripCalc.totalTripCost,
             ratePerKm,
             petrolPrice,
             mileage,
-            passengerShares,
-            sharingMode: settings.sharingMode || 'distance',
+            driverContribution: tripCalc.driverContribution,
+            passengerShares: tripCalc.passengerContributions,
+            friendsContribution: tripCalc.friendsContribution,
+            driverProfit: 0,
             notes: tripNotes.value.trim()
         };
         
@@ -370,10 +400,10 @@ CarpoolApp.init('trips', async function() {
                 CarpoolApp.showToast('Trip logged successfully.', 'success');
             }
             resetForm();
-            loadTrips();
+            await loadTrips();
         } catch (error) {
             console.error('Error saving trip:', error);
-            CarpoolApp.showToast('Error saving trip.', 'danger');
+            CarpoolApp.showToast('Failed to save trip.', 'danger');
         } finally {
             saveTripBtn.disabled = false;
         }
@@ -426,26 +456,34 @@ CarpoolApp.init('trips', async function() {
             trips.forEach(trip => {
                 const statusBadge = getStatusBadge(trip.status);
                 
-                // Render passenger badges with individual distances
+                // Render people badges with individual distances and contributions
                 let paxBadges = '<span class="text-muted small">—</span>';
+                let badgesArr = [];
+
+                if (trip.driverContribution !== undefined) {
+                    const dName = trip.driverName || 'Vivek';
+                    badgesArr.push(`<span class="badge bg-primary text-white border me-1 mb-1">${CarpoolApp.escapeHtml(dName)} (Driver • ₹${trip.driverContribution})</span>`);
+                }
+
                 if (trip.passengers && trip.passengers.length > 0) {
-                    paxBadges = trip.passengers.map(pid => {
+                    trip.passengers.forEach(pid => {
                         let name = pid;
                         let distStr = '';
                         if (trip.passengerDetails && trip.passengerDetails[pid]) {
                             name = trip.passengerDetails[pid].passengerName || pid;
-                            distStr = ` (${trip.passengerDetails[pid].chargeableDistance}km)`;
+                            distStr = ` • ${trip.passengerDetails[pid].chargeableDistance}km`;
                         } else {
                             const pObj = passengers.find(x => x.id === pid);
                             if (pObj) {
                                 name = pObj.name;
-                                distStr = ` (${pObj.pickupDistance || pObj.distance || 10}km)`;
+                                distStr = ` • ${pObj.pickupDistance || pObj.distance || 10}km`;
                             }
                         }
-                        const shareAmt = trip.passengerShares && trip.passengerShares[pid] ? ` • ₹${trip.passengerShares[pid]}` : '';
-                        return `<span class="badge bg-light text-dark border me-1 mb-1">${CarpoolApp.escapeHtml(name)}${distStr}${shareAmt}</span>`;
-                    }).join('');
+                        const shareAmt = trip.passengerShares && trip.passengerShares[pid] !== undefined ? ` • ₹${trip.passengerShares[pid]}` : '';
+                        badgesArr.push(`<span class="badge bg-light text-dark border me-1 mb-1">${CarpoolApp.escapeHtml(name)}${distStr}${shareAmt}</span>`);
+                    });
                 }
+                if (badgesArr.length > 0) paxBadges = badgesArr.join('');
                 
                 html += `
                     <tr>

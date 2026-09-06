@@ -121,9 +121,19 @@ CarpoolApp.init('calendar', async function() {
                 <a href="trips.html" class="btn btn-primary rounded-pill px-4">Log Trip</a>
             `;
         } else {
-            let passHtml = '<div class="text-muted small">No passengers in this trip.</div>';
+            let passHtml = '';
+            
+            // Driver Share row
+            const dName = trip.driverName || 'Vivek';
+            const dCost = trip.driverContribution !== undefined ? trip.driverContribution : (trip.fuelCost || 0);
+            passHtml += `
+                <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-0 bg-transparent border-bottom">
+                    <span><i class="bi bi-steering-wheel text-primary me-1"></i> <strong>${CarpoolApp.escapeHtml(dName)}</strong> <span class="badge bg-primary text-white ms-1">Driver</span></span>
+                    <strong class="text-primary">${CarpoolApp.formatCurrency(dCost)}</strong>
+                </li>
+            `;
+
             if (trip.passengers && trip.passengers.length > 0) {
-                passHtml = '<ul class="list-group list-group-flush mb-0">';
                 trip.passengers.forEach(pid => {
                     const p = passengers.find(x => x.id === pid);
                     const name = p ? p.name : (trip.passengerDetails?.[pid]?.passengerName || pid);
@@ -132,12 +142,13 @@ CarpoolApp.init('calendar', async function() {
                     const share = (trip.passengerShares && trip.passengerShares[pid]) || 0;
                     passHtml += `
                         <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-0 bg-transparent">
-                            <span><i class="bi bi-person-fill text-primary me-1"></i> <strong>${CarpoolApp.escapeHtml(name)}</strong><span class="text-muted small">${distText}</span></span>
-                            <strong class="text-primary">${CarpoolApp.formatCurrency(share)}</strong>
+                            <span><i class="bi bi-person-fill text-secondary me-1"></i> <strong>${CarpoolApp.escapeHtml(name)}</strong><span class="text-muted small">${distText}</span></span>
+                            <strong class="text-success">${CarpoolApp.formatCurrency(share)}</strong>
                         </li>
                     `;
                 });
-                passHtml += '</ul>';
+            } else {
+                passHtml += '<li class="list-group-item px-0 py-2 border-0 bg-transparent text-muted small">No passengers recorded.</li>';
             }
 
             modalBody.innerHTML = `
@@ -158,12 +169,14 @@ CarpoolApp.init('calendar', async function() {
                     <span>${(trip.fuelUsed || 0).toFixed(2)} L</span>
                 </div>
                 <div class="mb-3 d-flex justify-content-between align-items-center border-bottom pb-2">
-                    <span class="fw-bold text-muted small">Total Fuel Cost:</span>
+                    <span class="fw-bold text-muted small">Total Trip Cost:</span>
                     <strong class="text-primary fs-6">${CarpoolApp.formatCurrency(trip.fuelCost || 0)}</strong>
                 </div>
                 <div class="bg-light p-3 rounded-3 mb-2">
-                    <h6 class="fw-bold mb-2 small text-muted text-uppercase">Passengers & Individual Fares</h6>
-                    ${passHtml}
+                    <h6 class="fw-bold mb-2 small text-muted text-uppercase">People & Contributions</h6>
+                    <ul class="list-group list-group-flush mb-0">
+                        ${passHtml}
+                    </ul>
                 </div>
                 ${trip.notes ? `
                     <div class="bg-light p-2 rounded-3 small text-muted">

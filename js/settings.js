@@ -13,10 +13,6 @@ CarpoolApp.init('settings', async function() {
     
     await loadSettings();
     
-    document.querySelectorAll('input[name="sharingMode"]').forEach(el => {
-        el.addEventListener('change', toggleCustomPercentageSection);
-    });
-    
     document.getElementById('settingsForm').addEventListener('submit', handleSaveSettings);
     
     document.getElementById('petrolPrice').addEventListener('input', updateRatePreview);
@@ -44,8 +40,6 @@ CarpoolApp.init('settings', async function() {
         showConfirmModal('Clear All Payments', 'Are you sure you want to delete ALL payment records? This cannot be undone.', 'payments');
     });
     document.getElementById('confirmModalActionBtn').addEventListener('click', executeClearAction);
-    
-    document.getElementById('customPercentageInputs').addEventListener('input', calculateTotalPercentage);
 });
 
 async function loadSettings() {
@@ -57,7 +51,7 @@ async function loadSettings() {
         document.getElementById('fuelType').value = settings.fuelType || 'Petrol';
         document.getElementById('mileage').value = settings.mileage || '12';
         document.getElementById('petrolPrice').value = settings.petrolPrice || 105;
-        document.getElementById('driverDistance').value = settings.driverDistance || 17;
+        document.getElementById('driverDistance').value = settings.driverDistance || 18;
         
         if (settings.petrolPriceUpdated) {
             document.getElementById('petrolPriceUpdated').textContent = CarpoolApp.formatDate(settings.petrolPriceUpdated);
@@ -66,14 +60,6 @@ async function loadSettings() {
         document.getElementById('driverName').value = settings.driverName || 'Vivek';
         document.getElementById('tripExpiryHours').value = settings.tripExpiryHours || 4;
         
-        let mode = (settings.sharingMode || 'distance').toLowerCase();
-        if (mode === 'distance-based' || mode === 'distance_based') mode = 'distance';
-        
-        const modeInput = document.querySelector(`input[name="sharingMode"][value="${mode}"]`);
-        if (modeInput) modeInput.checked = true;
-        
-        renderCustomPercentageInputs(settings.customPercentages || {});
-        toggleCustomPercentageSection();
         updateRatePreview();
     }
 }
@@ -85,82 +71,10 @@ function updateRatePreview() {
     document.getElementById('settingsRatePreview').textContent = `₹${rate.toFixed(2)} / km (₹${price} ÷ ${mileage} km/l)`;
 }
 
-function renderCustomPercentageInputs(customPercentages) {
-    const container = document.getElementById('customPercentageInputs');
-    container.innerHTML = '';
-    
-    allPeople.forEach(person => {
-        if (person.active === false) return;
-        
-        const col = document.createElement('div');
-        col.className = 'col-6 col-md-4';
-        
-        const val = customPercentages[person.id] || 0;
-        
-        col.innerHTML = `
-            <label class="form-label small mb-1 fw-bold">${CarpoolApp.escapeHtml(person.name)} ${person.role === 'Driver' ? '(Driver)' : ''}</label>
-            <div class="input-group input-group-sm">
-                <input type="number" class="form-control pct-input" data-pid="${person.id}" value="${val}" min="0" max="100" step="0.1">
-                <span class="input-group-text">%</span>
-            </div>
-        `;
-        container.appendChild(col);
-    });
-    
-    calculateTotalPercentage();
-}
-
-function toggleCustomPercentageSection() {
-    const checkedMode = document.querySelector('input[name="sharingMode"]:checked');
-    const mode = checkedMode ? checkedMode.value : 'distance';
-    const container = document.getElementById('customPercentageContainer');
-    
-    if (mode === 'custom_percentage' || mode === 'custom-percentage') {
-        container.classList.remove('d-none');
-    } else {
-        container.classList.add('d-none');
-    }
-}
-
-function calculateTotalPercentage() {
-    let total = 0;
-    document.querySelectorAll('.pct-input').forEach(input => {
-        total += parseFloat(input.value || 0);
-    });
-    
-    const totalEl = document.getElementById('percentageTotal');
-    totalEl.textContent = total.toFixed(1);
-    
-    if (Math.abs(total - 100) > 0.1) {
-        totalEl.classList.add('text-danger');
-        document.getElementById('percentageError').classList.remove('d-none');
-    } else {
-        totalEl.classList.remove('text-danger');
-        document.getElementById('percentageError').classList.add('d-none');
-    }
-    
-    return total;
-}
-
 async function handleSaveSettings(e) {
     e.preventDefault();
     
     const newPrice = parseFloat(document.getElementById('petrolPrice').value);
-    const checkedMode = document.querySelector('input[name="sharingMode"]:checked');
-    const mode = checkedMode ? checkedMode.value : 'distance';
-    
-    let customPercentages = {};
-    if (mode === 'custom_percentage' || mode === 'custom-percentage') {
-        const total = calculateTotalPercentage();
-        if (Math.abs(total - 100) > 0.1) {
-            CarpoolApp.showToast('Percentages must sum to exactly 100%', 'danger');
-            return;
-        }
-        
-        document.querySelectorAll('.pct-input').forEach(input => {
-            customPercentages[input.dataset.pid] = parseFloat(input.value || 0);
-        });
-    }
     
     let driverId = CarpoolApp.getSettings()?.driverId || 'vivek';
     const driverName = document.getElementById('driverName').value.trim();
@@ -177,10 +91,8 @@ async function handleSaveSettings(e) {
         petrolPriceUpdated: CarpoolApp.formatDateISO(new Date()),
         driverName: driverName,
         driverId: driverId,
-        driverDistance: parseFloat(document.getElementById('driverDistance').value) || 17,
-        tripExpiryHours: parseInt(document.getElementById('tripExpiryHours').value) || 4,
-        sharingMode: mode,
-        customPercentages: customPercentages
+        driverDistance: parseFloat(document.getElementById('driverDistance').value) || 18,
+        tripExpiryHours: parseInt(document.getElementById('tripExpiryHours').value) || 4
     };
     
     const btn = document.getElementById('btnSaveSettings');

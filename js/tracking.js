@@ -260,41 +260,42 @@ window.CarpoolTracker = (function() {
             }, 10000);
 
             // Calculate immutable trip history records
-            const distance = completionOptions.actualRouteDistance || liveData?.actualRouteDistance || settings.driverDistance || 17;
+            const distance = completionOptions.actualRouteDistance || liveData?.actualRouteDistance || settings.driverDistance || 18;
             const petrolPrice = settings.petrolPrice || 105;
             const mileage = settings.mileage || 12;
             const ratePerKm = window.CarpoolApp.calculateRatePerKm(petrolPrice, mileage);
-            const fuelUsed = window.CarpoolApp.calculateFuelUsed(distance, mileage);
-            const fuelCost = window.CarpoolApp.calculateFuelCost(distance, mileage, petrolPrice);
+            const tripType = completionOptions.tripType || 'Office';
+            const multiplier = tripType === 'Full Day' ? 2 : 1;
 
             const pIds = liveData?.passengerIds || liveData?.passengers || [];
             const passengerDetails = liveData?.passengerDetails || {};
-            const customData = { passengerDistances: {} };
+            const customDistances = {};
             pIds.forEach(pid => {
                 if (passengerDetails[pid]) {
-                    customData.passengerDistances[pid] = passengerDetails[pid].finalDistance || passengerDetails[pid].chargeableDistance;
+                    customDistances[pid] = passengerDetails[pid].finalDistance || passengerDetails[pid].chargeableDistance;
                 } else {
                     const pObj = window.CarpoolApp.getPeople().find(x => x.id === pid || x.name === pid);
-                    customData.passengerDistances[pid] = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
+                    customDistances[pid] = pObj ? (pObj.pickupDistance || pObj.distance || 10) : 10;
                 }
             });
 
-            const passengerShares = window.CarpoolApp.calculateShares(fuelCost, pIds, settings.sharingMode, customData, {
+            const tripCalc = window.CarpoolApp.calculateTripContributions(distance, pIds, {
                 ratePerKm: ratePerKm,
                 petrolPrice: petrolPrice,
                 mileage: mileage,
-                actualDistance: distance
+                driverDistance: (settings.driverDistance || 18) * multiplier,
+                passengerDistances: customDistances
             });
 
             pIds.forEach(pid => {
                 if (passengerDetails[pid]) {
-                    passengerDetails[pid].amount = passengerShares[pid];
+                    passengerDetails[pid].amount = tripCalc.passengerContributions[pid] || 0;
                 }
             });
 
             const tripHistoryRecord = {
                 date: window.CarpoolApp.formatDateISO(new Date(liveData?.startTime || now)),
-                type: completionOptions.tripType || 'Office',
+                type: tripType,
                 driverId: settings.driverId || 'vivek',
                 driverName: settings.driverName || 'Vivek',
                 passengers: pIds,
@@ -306,10 +307,12 @@ window.CarpoolTracker = (function() {
                 mileage: mileage,
                 petrolPrice: petrolPrice,
                 ratePerKm: ratePerKm,
-                fuelUsed: fuelUsed,
-                fuelCost: fuelCost,
-                passengerShares: passengerShares,
-                sharingMode: settings.sharingMode || 'distance',
+                fuelUsed: tripCalc.fuelUsed,
+                fuelCost: tripCalc.totalTripCost,
+                driverContribution: tripCalc.driverContribution,
+                passengerShares: tripCalc.passengerContributions,
+                friendsContribution: tripCalc.friendsContribution,
+                driverProfit: 0,
                 status: 'Completed',
                 notes: `Live GPS Trip completed at ${window.CarpoolApp.formatTime(now)}.`
             };
